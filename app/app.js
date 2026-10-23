@@ -585,7 +585,7 @@ function weekChips(kid, c) {
     return `<div class="day">${d}<i>${jiok ? '지옥방' : cls ? '수업' : '·'}</i></div>`;
   }).join('');
 }
-const pendingCard = (kid, c) => (c.surveys[0] ? `<button class="svcard press" data-sv="${c.surveys[0].id}"><span style="font-size:26px">📝</span><span><b>${SV[c.surveys[0].kind].t}가 도착했어요</b><small>${SV[c.surveys[0].kind].items.length}문항 · 1분이면 끝나요</small></span><span class="go">›</span></button>` : '');
+const pendingCard = (kid, c) => (c.surveys[0] ? `<button class="svcard press" data-sv="${c.surveys[0].id}"><span style="font-size:26px">📝</span><span><b>${SV[c.surveys[0].kind].t}이 도착했어요</b><small>${SV[c.surveys[0].kind].items.length}문항 · 1분이면 끝나요</small></span><span class="go">›</span></button>` : '');
 function bindSurveyCards(kid) { $$('[data-sv]').forEach((b) => { b.onclick = () => go({ v: 'survey', kid: kid.id, id: b.dataset.sv }); }); }
 
 /* ------------------------------------------------------------------ */

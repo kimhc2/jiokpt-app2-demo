@@ -33,7 +33,9 @@ try {
   throw e;
 }
 
-const sb = createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+// 로그인 저장 칸을 앱과 따로 둡니다. 사본처럼 앱 · 콘솔이 같은 주소(kimhc2.github.io)에 있으면
+// 같은 칸을 써서 한쪽 로그인이 다른 쪽을 덮어씁니다. (운영은 주소가 달라 원래 문제없음)
+const sb = createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY, { auth: { storageKey: 'jp-console-auth' } });
 
 // 앱 개편 — 주간 리포트 카드 · 캐릭터 · 설문 문항은 학생 앱과 같은 파일 (shared/)
 import * as WK from './weekly.js';

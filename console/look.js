@@ -25,7 +25,7 @@ export const ITEMS = [
   { id: 'beanie',     name: '비니',        part: '머리', cond: '순공 5시간',         need: ['stay', 300] },
   { id: 'glasses',    name: '동글 안경',    part: '얼굴', cond: '순공 10시간',        need: ['stay', 600] },
   { id: 'sunglasses', name: '선글라스',     part: '얼굴', cond: '누적 300문제',       need: ['solved', 300] },
-  { id: 'headphone',  name: '헤드폰',      part: '머리', cond: '오공완 10번',        need: ['ok', 10] },
+  { id: 'headphone',  name: '헤드폰',      part: '목·몸', cond: '오공완 10번',       need: ['ok', 10] },
   { id: 'scarf',      name: '목도리',      part: '목·몸', cond: '2주 완주',          need: ['weeks', 2] },
   { id: 'bowtie',     name: '나비넥타이',   part: '목·몸', cond: '형성평가 70점',     need: ['best_test', 70] },
   { id: 'cap',        name: '학사모',      part: '머리', cond: '형성평가 +10점 성장', need: ['test_growth', 10] },
@@ -49,9 +49,12 @@ const statVal = (s, k) => (k === 'gold_now' ? (s?.gold_now ? 1 : 0) : Number(s?.
 export const isOpen = (x, stats) => !x.need || statVal(stats, x.need[0]) >= x.need[1];
 export const progress = (x, stats) => (x.need ? Math.min(1, statVal(stats, x.need[0]) / x.need[1]) : 1);
 
-// 스티커 그림이 준비된 소품은 PNG(투명 배경, 캐릭터와 같은 411×520 칸)를 씁니다.
+// 스티커 그림이 준비된 소품은 PNG(투명 배경, 캐릭터 411×520 칸 + 위로 150px = 411×670)를 씁니다.
 // 없는 것은 아래 임시 SVG 를 그립니다. 그림을 넣으면 이 목록에 id 만 추가하면 됩니다.
-export const ITEM_PNG = new Set([]);
+export const ITEM_PNG = new Set(['ribbon', 'flower', 'star_pin', 'cap', 'crown', 'beanie', 'headphone', 'halo',
+  'glasses', 'sunglasses', 'blush', 'scarf', 'bowtie', 'medal', 'wings']);
+// 몸 뒤에 그리는 소품
+const ITEM_BACK = new Set(['wings']);
 
 // 임시 소품 그림 (캐릭터 그림 좌표 411×520 기준)
 const ITEM_SVG = {
@@ -92,7 +95,7 @@ export function pib(look, w, cls = '') {
   const ch = CHARS.find((c) => c.id === l.ch) ?? CHARS[0];
   const fs = Math.max(9, w * 0.09);
   const item = ITEM_PNG.has(l.item)
-    ? `<img class="itemimg" src="items/${l.item}.png" alt="">`
+    ? `<img class="itemimg${ITEM_BACK.has(l.item) ? ' back' : ''}" src="items/${l.item}.png" alt="">`
     : `<svg class="item" viewBox="0 0 411 520">${ITEM_SVG[l.item] || ''}</svg>`;
   return `<span class="pw ${cls}" style="width:${w}px;--fs:${fs}px"><span class="fxb">${fxHTML(l.fx, false)}</span>` +
     `<img class="body" src="chars/${ch.id}.png" alt="${ch.name}">${item}<span class="fxf">${fxHTML(l.fx, true)}</span></span>`;

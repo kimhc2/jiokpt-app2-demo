@@ -2346,6 +2346,8 @@ async function loadSurveyPage() {
     if (c.answered_at && c.flags?.length) return `<button class="svc flag press" data-id="${c.id}">⚠ ${esc(c.flags[0])}${c.flags.length > 1 ? ` 외 ${c.flags.length - 1}` : ''}</button>`;
     if (c.answered_at) return `<button class="svc ok press" data-id="${c.id}">응답 ✓</button>`;
     if (c.sent_at) return `<span class="svc wait">${d(c.sent_at)} 보냄${c.reminded_at ? ' · 다시 알림 1번' : ''}</span>`;
+    // 보낼 때가 지났는데 아직이면: 받을 앱 계정이 없어 기다리는 중 (계정을 발급하면 10분 안에 갑니다)
+    if (new Date(c.due_at) < Date.now() - 15 * 60000) return `<span class="svc plan" title="${d(c.due_at)}부터 보낼 차례">앱 계정 없어 대기</span>`;
     return `<span class="svc plan">${d(c.due_at)} 예정</span>`;
   };
   const memoOf = (st) => svRows.find((x) => x.student_id === st.id && x.memo)?.memo ?? '';

@@ -1,0 +1,31 @@
+{
+  "name": "수학지옥pt (사본)",
+  "short_name": "지옥pt사본",
+  "description": "수업 밖 시간까지. 자녀의 수업 기록을 매일 확인하세요",
+  "lang": "ko",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FFF7F0",
+  "theme_color": "#FFF7F0",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

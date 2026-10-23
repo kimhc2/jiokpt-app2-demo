@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>수학지옥pt · 선생님 콘솔</title>
+<link rel="stylesheet" href="shared.css">
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
+<body>
+
+<header id="topbar" hidden>
+  <div class="brand">수학지옥<span>pt</span></div>
+  <nav>
+    <button class="navbtn" data-go="home">홈</button>
+    <button class="navbtn" data-go="roster">학생 관리</button>
+    <button class="navbtn" data-go="sent">보낸 리포트</button>
+    <button class="navbtn" data-go="weekly">주간 리포트 (금)</button>
+    <button class="navbtn" data-go="survey">설문<span id="svDot" class="navdot" hidden></span></button>
+    <button class="navbtn" data-go="health">알림 현황<span id="healthDot" class="navdot" hidden></span></button>
+    <button class="navbtn" data-go="staff" id="navStaff" hidden>선생님 관리</button>
+  </nav>
+  <div class="spacer"></div>
+  <span id="whoami" class="muted"></span>
+  <button id="logout" class="ghost">로그아웃</button>
+</header>
+
+<main>
+
+  <!-- 로그인 -->
+  <section id="view-login" class="view">
+    <div class="card narrow">
+      <h1>수학지옥<span class="accent">pt</span></h1>
+      <p class="muted">선생님 콘솔</p>
+      <form id="loginForm">
+        <label>이메일<input type="email" id="email" required autocomplete="username"></label>
+        <label>비밀번호<input type="password" id="password" required autocomplete="current-password"></label>
+        <button type="submit" class="primary wide">로그인</button>
+      </form>
+      <p id="loginError" class="error" hidden></p>
+    </div>
+  </section>
+
+  <!-- 첫 로그인 비밀번호 변경 (관리자가 만든 선생님 계정) -->
+  <section id="view-password" class="view" hidden>
+    <div class="card narrow">
+      <h2>비밀번호를 바꿔 주세요</h2>
+      <p class="muted small">관리자가 만든 임시 비밀번호로 로그인했습니다. 본인만 아는 비밀번호로 바꿔야 콘솔을 쓸 수 있습니다.</p>
+      <label>새 비밀번호 (8자 이상)<input type="password" id="pw1" autocomplete="new-password"></label>
+      <label>한 번 더<input type="password" id="pw2" autocomplete="new-password"></label>
+      <button class="primary wide" id="pwSave">바꾸기</button>
+      <p id="pwError" class="error" hidden></p>
+    </div>
+  </section>
+
+  <!-- 모니터링 -->
+  <section id="view-home" class="view">
+    <div id="setupWarn" class="notice err" hidden></div>
+    <div id="healthWarn" class="notice err" hidden></div>
+
+    <div class="monbar">
+      <div class="montitle">
+        <strong id="monCount">진행 중 0명</strong>
+        <span id="monSub" class="muted small"></span>
+      </div>
+      <div class="spacer"></div>
+      <div class="monactions">
+        <div class="seg" id="scopeSeg" role="group" aria-label="보기 범위">
+          <button data-scope="mine">내 학생</button>
+          <button data-scope="all">전체</button>
+        </div>
+        <button class="primary" id="openStart">＋ 수업 시작</button>
+      </div>
+    </div>
+
+    <div id="startError" class="notice err" hidden></div>
+
+    <div id="monGrid" class="grid"></div>
+    <p id="monEmpty" class="empty" hidden>
+      진행 중인 수업이 없습니다. 오른쪽 위 <b>수업 시작</b> 으로 학생을 넣으세요.
+    </p>
+
+    <div class="card">
+      <h2>오늘 마친 수업</h2>
+      <div id="doneList" class="list"></div>
+    </div>
+  </section>
+
+  <!-- 수업 요약 -->
+  <section id="view-summary" class="view" hidden>
+    <div class="card">
+      <h2 id="sumTitle">수업 요약</h2>
+      <div id="sumMeta" class="muted small"></div>
+      <div id="sumTable" class="list"></div>
+      <p class="note">
+        수업을 종료하면 이 요약이 학부모 앱 푸시로 자동 발송됩니다.
+        수업 중 매 기록마다 보내지 않고 종료 시 한 번만 보내는 것이 핵심입니다.
+      </p>
+      <div class="row">
+        <button class="primary" data-go="home">홈으로</button>
+        <button class="ghost" id="resendBtn">요약 다시 보내기</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 학생 관리 -->
+  <section id="view-roster" class="view" hidden>
+    <div class="card">
+      <h2>학생 한 명 추가</h2>
+      <form id="addStudentForm" class="row wrap">
+        <input type="text" id="stExt" placeholder="식별번호 (예: 184046)" inputmode="numeric">
+        <input type="text" id="stName" placeholder="이름" required>
+        <input type="text" id="stGrade" placeholder="학년 (예: 고2)">
+        <input type="text" id="stSchool" placeholder="학교">
+        <button type="submit" class="primary">추가</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>CSV로 여러 명 넣기</h2>
+      <p class="muted small">
+        첫 줄은 머리글이고, <code>식별번호,이름,학년,학교</code> 순서입니다.
+        학년과 학교는 비워둘 수 있습니다. 엑셀에서 저장한 CSV(euc-kr)도 그대로 읽습니다.
+        <b>이미 있는 식별번호나 이름은 건너뜁니다.</b>
+      </p>
+      <div class="row wrap" style="margin-bottom:10px">
+        <input type="file" id="csvFile" accept=".csv,text/csv,text/plain">
+        <button class="ghost" id="csvTemplate">양식 내려받기</button>
+      </div>
+      <textarea id="csvPaste" rows="4" placeholder="식별번호,이름,학년,학교
+184046,김민준,고2,온라인
+186197,이서연,고1,"></textarea>
+      <div class="row" style="margin-top:10px">
+        <button class="primary" id="csvImport">불러오기</button>
+        <span class="muted small">붙여넣기와 파일 중 아무거나 쓰면 됩니다.</span>
+      </div>
+      <div id="csvResult" class="notice" hidden></div>
+    </div>
+
+    <div class="card">
+      <h2 id="rosterTitle">학생 명단</h2>
+      <p class="muted small">
+        로그인 아이디는 <b>식별번호 + 역할</b>입니다 — <code>184046-s</code> 학생,
+        <code>184046-p</code> 보호자. 계정을 발급하면 임시 비밀번호가 <b>그때 한 번만</b>
+        표시됩니다. 시트에 옮겨 두세요. 잃어버리면 재발급하면 됩니다.
+      </p>
+      <div class="row wrap" id="rosterFilter">
+        <input type="search" id="rosterSearch" placeholder="이름 · 식별번호 검색" autocomplete="off">
+        <select id="rosterHome" class="sel" title="담임으로 거르기"></select>
+        <span id="rosterCount" class="muted small"></span>
+      </div>
+      <div class="row wrap" id="rosterTools">
+        <label class="ckline"><input type="checkbox" id="selAll"> 전체 선택</label>
+        <span id="selCount" class="muted small"></span>
+        <select id="bulkStage" class="sel" disabled title="선택한 학생의 스테이지를 한 번에 지정">
+          <option value="">선택 학생 스테이지 지정…</option>
+          <option value="1">스테이지 1 · 하루 25문제</option>
+          <option value="2">스테이지 2 · 하루 50문제</option>
+          <option value="3">스테이지 3 · 하루 75문제</option>
+          <option value="4">스테이지 4 · 하루 100문제</option>
+        </select>
+        <select id="bulkHome" class="sel" disabled title="선택한 학생의 담임을 한 번에 지정"></select>
+        <button class="ghost" id="issueSel" disabled>선택 학생 계정 발급</button>
+        <div class="spacer"></div>
+        <button class="ghost" id="archToggle">제거된 학생 보기</button>
+        <button class="danger" id="removeSel" disabled>선택 제거</button>
+      </div>
+      <div id="rosterList" class="list"></div>
+    </div>
+  </section>
+
+  <!-- 보낸 리포트 -->
+  <section id="view-sent" class="view" hidden>
+    <div class="card">
+      <div class="row wrap" id="sentFilter">
+        <h2 style="margin:0">보낸 리포트</h2>
+        <div class="spacer"></div>
+        <div class="seg" id="sentScope" role="group" aria-label="보기 범위">
+          <button data-scope="mine">내 학생</button>
+          <button data-scope="all">전체</button>
+        </div>
+        <select id="sentRange" class="sel" title="기간">
+          <option value="1">오늘</option>
+          <option value="7" selected>최근 7일</option>
+          <option value="30">최근 30일</option>
+          <option value="0">전체</option>
+        </select>
+        <input type="search" id="sentSearch" placeholder="학생 이름 검색" autocomplete="off">
+        <label class="ckline"><input type="checkbox" id="sentNoReport"> 리포트 없이 끝난 수업도 보기</label>
+        <button class="ghost tiny" id="sentReload">새로고침</button>
+      </div>
+      <div id="sentStats" class="stats"></div>
+      <div class="tblWrap"><table class="acctTbl" id="sentTable"></table></div>
+      <p id="sentEmpty" class="empty" hidden>이 기간에 보낸 리포트가 없습니다.</p>
+      <p class="muted small" style="margin:12px 0 0">
+        <b>보호자 알림</b> 은 그 리포트 알림이 보호자 기기에 갔는지입니다. <b>기기 없음</b> 은 보호자가 알림을 켜지 않은 경우입니다.
+        <b>리포트</b> 를 누르면 학부모 앱에 보이는 리포트 화면을, <b>기록</b> 을 누르면 그 수업의 졸음 · 딴짓 · 이탈 기록을 봅니다.
+      </p>
+    </div>
+  </section>
+
+  <!-- 주간 리포트 (금) — 버튼으로 체크 → 제출 → 전원 일괄 생성 → 앱으로 보내기 · zip 저장 -->
+  <section id="view-weekly" class="view jp2" hidden>
+    <div class="console">
+      <div class="row wrap" style="justify-content:space-between;gap:8px;margin-bottom:6px">
+        <div class="row" style="gap:8px">
+          <button class="ghost tiny" id="wkPrev" aria-label="지난주">‹</button>
+          <b style="font-size:20px;font-weight:900" id="wkTitle">이번 주 주간 리포트</b>
+          <button class="ghost tiny" id="wkNext" aria-label="다음 주">›</button>
+          <span class="muted small" id="wkRange"></span>
+        </div>
+        <div class="row" style="gap:8px">
+          <div class="seg" id="wkScope" role="group"><button data-scope="mine">내 학생</button><button data-scope="all">전체</button></div>
+          <button class="ghost tiny" id="wkPaste">📋 형성평가 점수 한꺼번에 붙여넣기</button>
+        </div>
+      </div>
+      <p class="muted small" style="margin-bottom:14px">지옥방 기록 · 순공시간 · 문제 · 정답률 · 딴짓 횟수는 <b>자동</b>이고, 학습 태도 · 집중도 · 할당량 수행은 기록을 보고 <b>미리 눌러 뒀어요</b>.
+        다른 것만 바꾸고 맨 아래 <b style="color:var(--fire)">제출</b>을 누르면 전원 리포트가 한 번에 만들어져요. 보내기 전까지는 학생 · 보호자에게 보이지 않아요.</p>
+      <div class="csg" id="wkCards"></div>
+      <div class="cfoot"><span class="muted small">↑ 추천 = 2주 연속 오공완 + 정답률 80% 이상 · 다음 주 스테이지는 일요일 밤에 바뀌어요</span>
+        <button class="btn sm press" id="wkSubmit" style="width:auto;padding:0 26px">제출하고 주간 리포트 만들기</button></div>
+      <div id="wkGallery"></div>
+    </div>
+  </section>
+
+  <!-- 설문 — 정해진 때에 앱으로 자동 발송 · 선생님은 '살펴볼 답'만 확인 -->
+  <section id="view-survey" class="view jp2" hidden>
+    <div class="console">
+      <div class="row wrap" style="justify-content:space-between;gap:8px;margin-bottom:12px">
+        <div><b style="font-size:20px;font-weight:900">설문</b> <span class="muted small">정해진 때에 앱으로 자동 발송 · 선생님은 '살펴볼 답'만 확인</span></div>
+        <div class="row" style="gap:8px"><div class="seg" id="svScope" role="group"><button data-scope="mine">내 학생</button><button data-scope="all">전체</button></div>
+          <span class="pill p-pink" id="svFlagN"></span><span class="pill p-sun" id="svWaitN"></span></div>
+      </div>
+      <div class="svsch" id="svSch"></div>
+      <div class="tblWrap"><table class="ctab" id="svTable"></table></div>
+      <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px;flex-wrap:wrap">
+        <button class="btn sm ghost press" id="svCsv" style="width:auto;padding:0 16px">⬇ 응답 내려받기 (csv)</button>
+        <button class="btn sm press" id="svRe" style="width:auto;padding:0 18px">미응답 다시 알림</button></div>
+      <div id="svDetail"></div>
+    </div>
+  </section>
+
+  <!-- 알림 현황 -->
+  <section id="view-health" class="view" hidden>
+    <div class="card">
+      <div class="row wrap">
+        <h2 style="margin:0">알림 현황 <span class="muted small" id="healthRange">최근 7일</span></h2>
+        <div class="spacer"></div>
+        <button class="ghost tiny" id="healthReload">새로고침</button>
+      </div>
+      <div id="healthStats" class="stats"></div>
+      <p class="muted small" style="margin:10px 0 0">
+        <b>못 받음(기기 없음)</b> 은 받을 사람이 알림을 켠 기기가 없는 경우, <b>발송 실패</b> 는 기기는 있는데 보내지 못한 경우입니다.
+        둘 다 그 사람의 앱에서 <b>알림 켜기</b>를 다시 하면 대부분 해결됩니다.
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>연결 점검 <span class="muted small" id="linkScope"></span></h2>
+      <div id="linkStats" class="stats"></div>
+      <div id="linkList" class="list"></div>
+    </div>
+
+    <div class="card">
+      <h2>최근 못 보낸 알림</h2>
+      <div class="tblWrap"><table class="acctTbl" id="failTable"></table></div>
+      <p id="failEmpty" class="empty" hidden>최근 7일 동안 못 보낸 알림이 없습니다.</p>
+    </div>
+  </section>
+
+  <!-- 선생님 관리 (관리자) -->
+  <section id="view-staff" class="view" hidden>
+    <div class="card">
+      <h2>선생님 계정 만들기</h2>
+      <form id="addTeacherForm" class="row wrap">
+        <input type="text" id="tName" placeholder="이름" required>
+        <input type="email" id="tEmail" placeholder="이메일 (로그인 아이디)" required>
+        <select id="tRole" class="sel">
+          <option value="teacher">선생님</option>
+          <option value="admin">관리자</option>
+        </select>
+        <button type="submit" class="primary">만들기</button>
+      </form>
+      <p class="muted small" style="margin:10px 0 0">
+        임시 비밀번호가 <b>한 번만</b> 표시됩니다. 선생님은 첫 로그인 때 비밀번호를 바꿉니다.
+        <b>관리자</b>는 선생님 계정을 만들고 비밀번호를 재발급할 수 있습니다.
+      </p>
+    </div>
+    <div class="card">
+      <h2>선생님 목록</h2>
+      <div id="staffList" class="list"></div>
+    </div>
+  </section>
+
+</main>
+
+<!-- 보낸 리포트 · 학부모 앱 화면 그대로 -->
+<div id="pvScrim" class="drawerScrim" hidden></div>
+<div id="pvModal" class="modal" hidden role="dialog" aria-label="보낸 리포트">
+  <div class="modalHead">
+    <div>
+      <strong id="pvTitle">리포트</strong>
+      <span class="muted small">학부모 · 학생 앱에 보이는 화면 그대로입니다</span>
+    </div>
+    <button class="iconbtn" id="pvClose" aria-label="닫기">✕</button>
+  </div>
+  <div class="modalBody pvBody">
+    <iframe id="pvFrame" title="리포트 미리보기"></iframe>
+    <p id="pvPush" class="muted small" hidden></p>
+  </div>
+</div>
+
+<!-- 선생님 임시 비밀번호 -->
+<div id="tScrim" class="drawerScrim" hidden></div>
+<div id="tModal" class="modal" hidden role="dialog" aria-label="선생님 계정">
+  <div class="modalHead">
+    <div>
+      <strong id="tModalTitle">선생님 계정</strong>
+      <span class="muted small">임시 비밀번호는 이 화면을 닫으면 다시 볼 수 없습니다</span>
+    </div>
+    <button class="iconbtn" id="tClose" aria-label="닫기">✕</button>
+  </div>
+  <div class="modalBody">
+    <table class="acctTbl" id="tTable"></table>
+  </div>
+  <div class="modalFoot">
+    <button class="primary" id="tCopy">복사</button>
+    <div class="spacer"></div>
+    <button class="ghost" id="tDone">닫기</button>
+  </div>
+</div>
+
+<!-- 계정 발급 결과 -->
+<div id="acctScrim" class="drawerScrim" hidden></div>
+<div id="acctModal" class="modal wide" hidden role="dialog" aria-label="계정 발급 결과">
+  <div class="modalHead">
+    <div>
+      <strong>계정 발급 완료</strong>
+      <span class="muted small">임시 비밀번호는 이 화면을 닫으면 다시 볼 수 없습니다</span>
+    </div>
+    <button class="iconbtn" id="acctClose" aria-label="닫기">✕</button>
+  </div>
+  <div class="modalBody">
+    <div class="notice err" style="margin-top:0">
+      <b>지금 시트에 옮겨 두세요.</b><br>
+      비밀번호는 저장하지 않습니다. 나중에 필요하면 다시 발급하면 되고,
+      재발급하면 이전 비밀번호는 못 씁니다.
+    </div>
+    <div class="tblWrap"><table class="acctTbl" id="acctTable"></table></div>
+    <div id="acctProblems" class="notice err" hidden></div>
+  </div>
+  <div class="modalFoot">
+    <button class="primary" id="acctCopy">시트에 붙여넣기용 복사</button>
+    <button class="ghost" id="acctCsv">CSV 내려받기</button>
+    <div class="spacer"></div>
+    <button class="ghost" id="acctDone">닫기</button>
+  </div>
+</div>
+
+<!-- 수업 종료 · 데일리 리포트 입력 -->
+<div id="reportScrim" class="drawerScrim" hidden></div>
+<div id="reportModal" class="modal" hidden role="dialog" aria-label="데일리 리포트 입력">
+  <div class="modalHead">
+    <div>
+      <strong id="rpWho">학생</strong>
+      <span id="rpMeta" class="muted small"></span>
+    </div>
+    <button class="iconbtn" id="rpClose" aria-label="닫기">✕</button>
+  </div>
+
+  <div class="modalBody">
+    <div class="fgrid">
+      <label>할당 문제 수
+        <input type="number" id="rpAssigned" min="0" max="999" inputmode="numeric">
+      </label>
+      <label>푼 문제 수
+        <input type="number" id="rpSolved" min="0" max="999" inputmode="numeric">
+      </label>
+      <label>맞은 문제 수
+        <input type="number" id="rpCorrect" min="0" max="999" inputmode="numeric">
+      </label>
+      <label>순공시간 (분)
+        <input type="number" id="rpStay" min="0" max="1440" inputmode="numeric">
+      </label>
+    </div>
+
+    <div class="calcBox" id="rpCalc"></div>
+
+    <label>메모 <span class="muted small">(선택 · 보호자 리포트에 함께 표시됩니다)</span>
+      <input type="text" id="rpMemo" maxlength="120" placeholder="예) 후반부 집중력이 크게 올라왔습니다">
+    </label>
+
+    <p id="rpError" class="notice err" hidden></p>
+  </div>
+
+  <div class="modalFoot">
+    <button class="ghost" id="rpSkip">리포트 없이 종료</button>
+    <div class="spacer"></div>
+    <button class="primary" id="rpSubmit">종료하고 리포트 발송</button>
+  </div>
+</div>
+
+<!-- 수업 시작 사이드바 -->
+<div id="drawerScrim" class="drawerScrim" hidden></div>
+<aside id="startPanel" class="drawer" hidden aria-label="수업 시작">
+  <div class="drawerHead">
+    <strong>수업 시작</strong>
+    <button class="iconbtn" id="closeStart" aria-label="닫기">✕</button>
+  </div>
+  <div class="drawerBody">
+    <label>수업 이름 <span class="muted small">(선택)</span>
+      <input type="text" id="sessionTitle" placeholder="예) 미적분 2교시">
+    </label>
+    <input type="search" id="stuSearch" placeholder="학생 이름 검색" autocomplete="off">
+    <p class="muted small" id="startCount"></p>
+    <div id="startList" class="list"></div>
+  </div>
+</aside>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="config.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

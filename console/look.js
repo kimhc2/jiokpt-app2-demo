@@ -25,7 +25,7 @@ export const ITEMS = [
   { id: 'beanie',     name: '비니',        part: '머리', cond: '순공 5시간',         need: ['stay', 300] },
   { id: 'glasses',    name: '동글 안경',    part: '얼굴', cond: '순공 10시간',        need: ['stay', 600] },
   { id: 'sunglasses', name: '선글라스',     part: '얼굴', cond: '누적 300문제',       need: ['solved', 300] },
-  { id: 'headphone',  name: '헤드폰',      part: '목·몸', cond: '오공완 10번',       need: ['ok', 10] },
+  { id: 'headphone',  name: '헤드폰',      part: '머리', cond: '오공완 10번',        need: ['ok', 10] },
   { id: 'scarf',      name: '목도리',      part: '목·몸', cond: '2주 완주',          need: ['weeks', 2] },
   { id: 'bowtie',     name: '나비넥타이',   part: '목·몸', cond: '형성평가 70점',     need: ['best_test', 70] },
   { id: 'cap',        name: '학사모',      part: '머리', cond: '형성평가 +10점 성장', need: ['test_growth', 10] },

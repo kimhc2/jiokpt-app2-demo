@@ -1,3 +1,4 @@
+import { notificationChanged } from './rules.js';
 // 수학지옥pt 학생·보호자 앱 (개편판)
 //
 // 로그인 · 알림 · 화면 이동 · 자녀 추가는 운영 앱과 같은 코드입니다.
@@ -129,11 +130,48 @@ function banner(t, b, ms = 3200) {
   $('#bannerT').textContent = t; $('#bannerB').textContent = b; $('#banner').classList.add('show');
   clearTimeout(banner.t); banner.t = setTimeout(() => $('#banner').classList.remove('show'), ms);
 }
-function sheet(html) { $('#sheet').innerHTML = html; $('#sheet').classList.add('show'); $('#dim').classList.add('show'); }
-function closeSheet() { $('#sheet').classList.remove('show'); $('#dim').classList.remove('show'); }
+function sheet(html) {
+  overlayFocus = document.activeElement;
+  const sh = $('#sheet'); sh.innerHTML = html; sh.inert = false; sh.setAttribute('aria-hidden', 'false');
+  sh.classList.add('show'); $('#dim').classList.add('show');
+  requestAnimationFrame(() => { if (sh.classList.contains('show')) sh.querySelector('button,input,textarea')?.focus(); });
+}
+let overlayFocus = null;
+function closeSheet() {
+  const sh = $('#sheet'); sh.classList.remove('show'); sh.inert = true; sh.setAttribute('aria-hidden', 'true');
+  $('#dim').classList.remove('show');
+  if (overlayFocus?.isConnected) overlayFocus.focus();
+}
+document.addEventListener('keydown', (e) => {
+  const panel = document.querySelector('#cele.show, #sheet.show'); if (!panel) return;
+  if (e.key === 'Escape') { closeSheet(); closeCele(); return; }
+  if (e.key !== 'Tab') return;
+  const items = [...panel.querySelectorAll('button:not(:disabled),input,textarea,select,[tabindex="0"]')];
+  const first = items[0], last = items[items.length - 1]; if (!first) return;
+  if (e.shiftKey && (document.activeElement === first || !panel.contains(document.activeElement))) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && (document.activeElement === last || !panel.contains(document.activeElement))) { e.preventDefault(); first.focus(); }
+});
 $('#dim').onclick = closeSheet;
-function cele(html) { const c = $('#cele'); c.innerHTML = html; c.classList.add('show'); confetti(); }
-function closeCele() { $('#cele').classList.remove('show'); }
+let celebrationTimer = null;
+function scheduleCelebration(fn, onShown) {
+  clearTimeout(celebrationTimer);
+  const version = viewVersion;
+  celebrationTimer = setTimeout(() => {
+    celebrationTimer = null;
+    if (version !== viewVersion || state.route?.v !== 'home') return;
+    onShown(); fn();
+  }, matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 1200);
+}
+function cele(html) {
+  overlayFocus = document.activeElement;
+  const c = $('#cele'); c.innerHTML = html; c.inert = false; c.setAttribute('aria-hidden', 'false'); c.classList.add('show');
+  c.querySelector('button')?.focus(); confetti();
+}
+function closeCele() {
+  clearTimeout(celebrationTimer); celebrationTimer = null;
+  const c = $('#cele'); const open = c.classList.contains('show'); c.classList.remove('show'); c.inert = true; c.setAttribute('aria-hidden', 'true');
+  if (open && overlayFocus?.isConnected) overlayFocus.focus();
+}
 function confetti() {
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const cv = $('#fx'), ctx = cv.getContext('2d'); cv.width = innerWidth; cv.height = innerHeight;
@@ -150,8 +188,9 @@ function animBars(root = $('#view-main')) {
   setTimeout(() => $$('[data-w]', root).forEach((i) => { i.style.width = i.dataset.w; }), 80);
 }
 function countUp(e, to, ms = 900) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { e.textContent = to; return; }
   const t0 = performance.now();
-  (function s(t) { const k = Math.min(1, (t - t0) / ms); e.textContent = Math.round(to * (1 - Math.pow(1 - k, 3))); if (k < 1) requestAnimationFrame(s); })(t0);
+  (function s(t) { if (!e.isConnected) return; const k = Math.min(1, (t - t0) / ms); e.textContent = Math.round(to * (1 - Math.pow(1 - k, 3))); if (k < 1) requestAnimationFrame(s); })(t0);
 }
 
 /* ------------------------------------------------------------------ */
@@ -160,6 +199,7 @@ function countUp(e, to, ms = 900) {
 /*   앱을 닫지 않고 바로 앞 화면으로 돌아가게 합니다.                       */
 /*   학생 탭(홈 · 랭킹 · 꾸미기 · 기록 · 나)끼리는 쌓지 않고 바꿔 끼웁니다.  */
 /* ------------------------------------------------------------------ */
+let viewVersion = 0;
 const TABS = ['home', 'rank', 'deco', 'rec', 'me'];
 function go(route, { replace = false } = {}) {
   const tabSwitch = state.mode === 'student' && TABS.includes(route.v) && TABS.includes(state.route?.v);
@@ -169,6 +209,7 @@ function go(route, { replace = false } = {}) {
 function findKid(id) { return [state.own, ...state.children].find((k) => k && k.id === id) ?? null; }
 
 async function render(r) {
+  viewVersion++;
   if (!state.me) return show('auth');
   closeSheet(); closeCele();
   state.route = r;
@@ -199,6 +240,7 @@ addEventListener('popstate', (e) => {
 });
 
 function show(name) {
+  $('#bootStatus')?.remove();
   $$('.view').forEach((v) => { v.hidden = v.id !== 'view-' + name; });
   if (name !== 'main') $('#tabbar').hidden = true;
   window.scrollTo(0, 0);
@@ -213,7 +255,7 @@ function mount(html, { tab = null } = {}) {
   if (nc && v.contains(nc)) { nc.hidden = true; document.body.append(nc); }
   v.className = 'view enter';
   v.innerHTML = html;
-  setTimeout(() => v.classList.remove('enter'), 700);
+  setTimeout(() => v.classList.remove('enter'), 800);
   const tb = $('#tabbar');
   if (tab && state.mode === 'student') {
     const pending = (state.kid[state.own.id]?.surveys ?? []).length;
@@ -487,8 +529,7 @@ function startPolling() {
       const { data } = await sb.from('notifications').select('id').eq('recipient_id', state.uid)
         .order('created_at', { ascending: false }).limit(1);
       const newest = data?.[0]?.id ?? null;
-      if (state.newestAlertId == null) state.newestAlertId = newest;
-      else if (newest && newest !== state.newestAlertId) { state.newestAlertId = newest; await refreshNow(); }
+      if (notificationChanged(state.newestAlertId, newest)) { state.newestAlertId = newest; await refreshNow(); }
     } catch (e) { console.warn('확인 실패', e); }
   }, 20000);
 }
@@ -545,7 +586,7 @@ async function loadKid(kid, force = false) {
     state.mode === 'student' ? sb.from('league_history').select('*').eq('student_id', kid.id) : Promise.resolve({ data: [] }),
     sb.rpc('list_checkins', { p_student: kid.id }),
   ]);
-  for (const r of [reps, sums, sched, weekly, sv, ci]) if (r.error) throw r.error;
+  for (const r of [reps, sums, sched, weekly, sv, stats, hist, ci]) if (r.error) throw r.error;
   const out = {
     at: Date.now(), ws,
     reps: reps.data ?? [], sums: sums.data ?? [], sched: sched.data ?? [], weekly: weekly.data ?? [],
@@ -606,6 +647,7 @@ function bindSurveyCards(kid) {
 /* 홈                                                                  */
 /* ------------------------------------------------------------------ */
 async function scrHome() {
+  const viewAtStart = viewVersion;
   if (state.mode === 'parent') return scrParentHome();
   const kid = state.own;
   const [c, L] = await Promise.all([loadKid(kid), loadLeague().catch(() => null)]);
@@ -614,11 +656,12 @@ async function scrHome() {
   const say = r ? (r.participation_ok ? (r.pt_over ? `오늘 오공완! 순공도 ${r.stay_minutes - r.mandatory_minutes}분 더 했어 🔥` : '오늘 오공완! 이대로만 가자 🔥') : '리포트 왔어! 다음엔 할당량까지 끝내 보자')
     : T.jiokToday ? `오늘 할당량 ${T.goal}문제, 같이 끝내 보자!` : T.dow === 5 ? '오늘은 형성평가 날! 역전 찬스야' : '오늘은 지옥방 없는 날. 푹 쉬고 다음에 달리자';
   const me = myRow(L);
+  if (viewAtStart !== viewVersion) return;
   const v = mount(`
     <div class="row" style="justify-content:space-between;margin:2px 0 10px"><div><div class="muted small">${d.getMonth() + 1}월 ${d.getDate()}일 ${WEEK[d.getDay()]}요일</div><b style="font-size:19px;font-weight:900">${esc(kid.nickname || kid.name)}</b></div><span class="pill p-fire">🔥 연속 오공완 ${c.stats.streak ?? 0}번</span></div>
     <div id="ncHost"></div>
     <div class="hero">
-      <div class="row" style="align-items:flex-end">${pib(kid.look, 112, r?.participation_ok ? 'm-cheer' : 'm-idle')}
+      <div class="row" style="align-items:flex-end">${pib(kid.look, 112, r?.participation_ok ? 'm-cheer m-settle' : 'm-idle')}
         <div style="flex:1;padding-bottom:16px"><div class="say">${say}</div></div></div>
       <div class="card" style="margin:12px 0 0;box-shadow:none">
         <div class="row" style="justify-content:space-between;margin-bottom:10px"><b style="font-weight:900">오늘 지옥방</b><span class="pill p-sun">STAGE ${kid.stage} · 지옥방 1회 ${T.goal}문제</span></div>
@@ -651,27 +694,23 @@ function checkCelebrate(kid, c, L) {
   const lastWk = c.weekly[0];
   const now = { rep: lastRep?.session_id ?? null, wk: lastWk?.id ?? null };
   if (!seen) { store.set(key, JSON.stringify(now)); return; }
-  store.set(key, JSON.stringify(now));
-  if (lastWk && lastWk.id !== seen.wk && Date.now() - new Date(lastWk.sent_at) < 3 * DAY) return celebrateWeekly(kid, c, L, lastWk);
-  if (lastRep && lastRep.session_id !== seen.rep && Date.now() - new Date(lastRep.reported_at) < 3 * DAY) return celebrateReport(kid, L, lastRep);
+  const acknowledged = () => store.set(key, JSON.stringify(now));
+  const newReport = lastRep && lastRep.session_id !== seen.rep && Date.now() - new Date(lastRep.reported_at) < 3 * DAY;
+  if (lastWk && lastWk.id !== seen.wk && Date.now() - new Date(lastWk.sent_at) < 3 * DAY) return celebrateWeekly(kid, c, L, lastWk, newReport ? lastRep : null, acknowledged);
+  if (newReport) return celebrateReport(kid, L, lastRep, acknowledged);
+  acknowledged();
 }
-function rankBefore(L, gain) {
-  const me = myRow(L); if (!me) return null;
-  const before = me.points - gain;
-  return L.members.filter((m) => !m.me && m.points > before).length + 1;
+function rankPills(_before, after, color = 'fire') {
+  return after ? `<div class="pill p-${color}" style="margin-bottom:14px">현재 ${after}위${after === 1 ? ' 👑' : ''}</div>` : '';
 }
-function rankPills(before, after, color = 'fire') {
-  if (!before || !after) return '';
-  return `<div class="row" style="gap:8px;margin-bottom:14px;justify-content:center"><span class="pill p-gray" style="font-size:13px">${before}위</span><span style="font-weight:900;color:var(--${color})">→</span><span class="pill p-${color}" style="font-size:15px">${after}위 ${after < before ? '⬆' : ''}${after === 1 ? ' 👑' : ''}</span></div>`;
-}
-function celebrateReport(kid, L, r) {
-  const after = myRank(L), before = rankBefore(L, r.points);
+function celebrateReport(kid, L, r, onShown = () => {}) {
+  const after = myRank(L), before = null;
   banner(r.participation_ok ? '오공완 리포트가 도착했어요' : '오늘 리포트가 도착했어요', `문제 ${r.solved}/${r.assigned} · 순공 ${hm(r.stay_minutes)} · +${r.points}점 바로 반영!`);
-  setTimeout(() => {
+  scheduleCelebration(() => {
     cele(`
       <div style="font-size:13px;font-weight:900;color:var(--fire);letter-spacing:1px">${r.participation_ok ? '오늘 공부 완료!' : '오늘 리포트 도착!'}</div>
       <div class="big" style="margin:6px 0 4px;font-size:34px">+<span id="cu">0</span>점</div>
-      <div style="margin:4px 0 10px">${pib(kid.look, 120, 'm-cheer')}</div>
+      <div style="margin:4px 0 10px">${pib(kid.look, 120, 'm-cheer m-settle')}</div>
       <div class="card" style="width:100%;margin-bottom:10px">${pointRows(r)}</div>
       ${rankPills(before, after)}
       <button class="btn press" id="seeRank">랭킹에서 보기</button>
@@ -679,7 +718,7 @@ function celebrateReport(kid, L, r) {
     countUp($('#cu'), r.points);
     $('#seeRank').onclick = () => { closeCele(); go({ v: 'rank', anim: true, gain: r.points }); };
     $('#closeC').onclick = closeCele;
-  }, 1200);
+  }, onShown);
 }
 function pointRows(r) {
   const rows = [
@@ -689,31 +728,35 @@ function pointRows(r) {
   if (r.pt_over) rows.push([`순공 ${r.stay_minutes - r.mandatory_minutes}분 더 <small class="muted">(30분마다 +1)</small>`, r.pt_over, false]);
   return rows.map(([t, p, base]) => `<div class="rc ${base ? 'base' : ''}"><span>${t}</span><span class="plus">+${p}</span></div>`).join('');
 }
-async function celebrateWeekly(kid, c, L, w) {
+async function celebrateWeekly(kid, c, L, w, daily = null, onShown = () => {}) {
   const prev = c.weekly.find((x) => x.week_start < w.week_start && x.test_score != null)?.test_score ?? null;
   const s = w.test_score, ts = s == null ? 0 : Math.round(s / 4), g = s != null && prev != null && s > prev ? 5 : 0;
-  const gain = w.week_start === c.ws ? ts + g : 0;
+  const gain = (w.week_start === c.ws ? ts + g : 0) + (daily?.points ?? 0);
   banner(w.gold ? '🏅 이번 주 기준 통과!' : '주간 리포트가 왔어요', s != null ? `형성평가 ${s}점${g ? ` · 지난번보다 +${s - prev}점` : ''}` : '이번 주 리포트가 왔어요');
-  setTimeout(() => {
+  scheduleCelebration(() => {
     cele(`
       <div style="font-size:13px;font-weight:900;color:var(--sky);letter-spacing:1px">${s != null ? '금요일 역전 찬스!' : '주간 리포트 도착'}</div>
       ${s != null ? `<div class="big" style="margin:6px 0">${s}점</div>${prev != null ? `<div class="muted small" style="margin-bottom:10px">지난번 ${prev}점 → 이번 ${s}점 (${s - prev >= 0 ? '+' : ''}${s - prev})</div>` : ''}` : ''}
-      ${pib(kid.look, 120, 'm-cheer')}
+      ${pib(kid.look, 120, 'm-cheer m-settle')}
       ${s != null ? `<div class="card" style="width:100%;margin:10px 0"><div class="rc"><span>형성평가 ${s}점 ÷ 4</span><span class="plus" style="color:var(--sky)">+${ts}</span></div><div class="rc"><span>성장 보너스 ${g ? '(지난번보다 오름)' : ''}</span><span class="plus" style="color:var(--sky)">+${g}</span></div></div>` : ''}
       ${w.gold ? '<div class="pill p-sun" style="font-size:13px;margin-bottom:10px">🏅 다음 주 한 주 동안 황금 오라!</div>' : ''}
-      ${gain ? rankPills(rankBefore(L, gain), myRank(L), 'sky') : ''}
+      ${daily ? `<div class="card" style="width:100%;margin:8px 0"><b>오늘 지옥방 +${daily.points}점</b>${pointRows(daily)}</div>` : ''}
+      ${gain ? rankPills(null, myRank(L), 'sky') : ''}
       <button class="btn press" id="seeW" style="background:var(--sky);box-shadow:none">주간 리포트 보기</button>
-      ${gain ? '<button class="btn ghost press" id="seeR" style="margin-top:8px">랭킹 보기</button>' : ''}`);
+      ${gain ? '<button class="btn ghost press" id="seeR" style="margin-top:8px">랭킹 보기</button>' : ''}<button class="btn ghost press" id="closeW" style="margin-top:8px">닫기</button>`);
+    $('#closeW').onclick = closeCele;
     $('#seeW').onclick = () => { closeCele(); go({ v: 'weekly', w: w.week_start }); };
     const sr = $('#seeR'); if (sr) sr.onclick = () => { closeCele(); go({ v: 'rank', anim: true, gain }); };
-  }, 1200);
+  }, onShown);
 }
 
 /* ---- 보호자: 자녀 목록 ---- */
 async function scrParentHome() {
+  const viewAtStart = viewVersion;
   const kids = state.children;
   const cs = await Promise.all(kids.map((k) => loadKid(k).catch(() => null)));
   await loadAlerts();
+  if (viewAtStart !== viewVersion) return;
   const v = mount(`
     ${head('자녀 공부 기록', { back: false, right: '<button class="back press" id="menuBtn" aria-label="메뉴">⋯</button>' })}
     <div id="ncHost"></div>
@@ -734,12 +777,14 @@ async function scrParentHome() {
 
 /* ---- 보호자: 자녀 한 명 (보호자 화면에는 랭킹 · 닉네임이 없습니다. 스트릭만) ---- */
 async function scrKid(kid) {
+  const viewAtStart = viewVersion;
   if (state.mode === 'student') return scrHome();
   const c = await loadKid(kid);
   await loadAlerts();
   const last = c.reps[c.reps.length - 1];
   const lastW = c.weekly[0];
   const unread = state.alerts.filter((n) => !n.read_at && alertFor(n, kid)).length;
+  if (viewAtStart !== viewVersion) return;
   const v = mount(`
     ${head(esc(kid.name), { right: `<span class="pill p-sun">STAGE ${kid.stage}</span>` })}
     <div class="hero"><div class="row" style="align-items:flex-end">${pib(kid.look, 100, 'm-idle')}
@@ -785,12 +830,14 @@ function namesBy(t) {
   return out;
 }
 async function scrNick() {
+  const viewAtStart = viewVersion;
   const kid = state.own; if (!kid) return scrHome();
   await loadWords();
   const first = !kid.nickname;
   const until = kid.nickname_at ? new Date(new Date(kid.nickname_at).getTime() + 14 * DAY) : null;
   const locked = !first && until && until > new Date();
   cands = []; pick = -1;
+  if (viewAtStart !== viewVersion) return;
   const v = mount(`
     ${head('랭킹에 쓸 이름 뽑기', { back: !first, right: first ? '<span class="pill p-fire">처음 한 번</span>' : '' })}
     <div style="text-align:center;margin:2px 0 10px">${pib(kid.look, 120, 'm-idle')}</div>
@@ -804,15 +851,19 @@ async function scrNick() {
   if (locked) return;
   $$('#tone button', v).forEach((b) => { b.onclick = () => { tone = +b.dataset.t; $$('#tone button').forEach((x) => x.classList.toggle('on', x === b)); }; });
   $('#spin').onclick = () => {
+    if ($('#spin').disabled) return;
+    $('#spin').disabled = true;
     const pool = namesBy(tone), slot = $('#slot'), t = $('#slotT');
+    if (!pool.length) { $('#spin').disabled = false; return toast('남은 이름이 없어요. 다른 분위기를 골라 주세요'); }
     slot.classList.add('spin'); pick = -1;
     let n = 0;
     const iv = setInterval(() => {
+      if (!slot.isConnected) { clearInterval(iv); return; }
       t.textContent = pool[Math.floor(Math.random() * pool.length)];
       if (++n > 16) {
         clearInterval(iv); slot.classList.remove('spin');
         const set = new Set(); while (set.size < 3 && set.size < pool.length) set.add(pool[Math.floor(Math.random() * pool.length)]);
-        cands = [...set]; t.textContent = '셋 중에 골라요!'; drawCands();
+        cands = [...set]; t.textContent = '셋 중에 골라요!'; drawCands(); $('#spin').disabled = false;
       }
     }, 70);
   };
@@ -837,11 +888,14 @@ function drawCands() {
 /* 랭킹 — 같은 스테이지 10명                                             */
 /* ------------------------------------------------------------------ */
 async function scrRank(r = {}) {
+  const viewAtStart = viewVersion;
   const kid = state.own;
   const [L, c] = await Promise.all([loadLeague(), loadKid(kid)]);
+  if (!L?.members?.length) return mount(`${head('랭킹', { back: false })}<div class="card empty">아직 리그가 준비되지 않았어요. 잠시 후 다시 확인해 주세요.</div>`, { tab: 'rank' });
   const M = L.members, me = myRow(L), rk = myRank(L);
   const testSent = c.weekly.some((w) => w.week_start === c.ws);
   const gap = M[0].points - (me?.points ?? 0);
+  if (viewAtStart !== viewVersion) return;
   const v = mount(`
     ${head(`${esc(L.tier_name)} 리그`, { back: false, right: '<button class="pill p-gray press" id="rules">점수 규칙 ⓘ</button>' })}
     <div class="card" style="background:${testSent ? 'var(--mintbg)' : 'var(--skybg)'};box-shadow:none;padding:13px 15px">
@@ -855,11 +909,10 @@ async function scrRank(r = {}) {
   if (r.anim) {
     const meRow = $('#lb .lrow.me');
     if (meRow) {
-      meRow.style.transform = 'translateY(110px)';
-      requestAnimationFrame(() => requestAnimationFrame(() => { meRow.style.transform = 'none'; }));
+      meRow.classList.add('rank-gain');
       meRow.insertAdjacentHTML('beforeend', `<span class="gain">+${r.gain ?? ''}</span>`);
     }
-    history.replaceState({ v: 'rank' }, '');
+    state.route = { v: 'rank' }; history.replaceState(state.route, '');
   }
   void v;
 }
@@ -891,7 +944,9 @@ function rulesSheet() {
 /* 꾸미기 — 공부 기록으로만 열림 (재화 · 뽑기 · 결제 없음)                  */
 /* ------------------------------------------------------------------ */
 let decoTab = 'ch';
+let decoSaving = false;
 async function scrDeco() {
+  const viewAtStart = viewVersion;
   const kid = state.own;
   const c = await loadKid(kid);
   const S = c.stats, look = { ch: 'pi_red', item: 'none', fx: 'none', ...(kid.look || {}) };
@@ -899,6 +954,7 @@ async function scrDeco() {
   const key = decoTab === 'ch' ? 'ch' : decoTab === 'item' ? 'item' : 'fx';
   const opened = list.filter((x) => isOpen(x, S)).length;
   let lastPart = null;
+  if (viewAtStart !== viewVersion) return;
   const v = mount(`
     ${head('꾸미기', { back: false, right: `<span class="pill p-pink">${opened} / ${list.length} 모음</span>` })}
     <div class="stagebox" id="stg">${pib(look, 170, 'm-idle')}</div>
@@ -913,18 +969,29 @@ async function scrDeco() {
     }).join('')}</div>
     <p class="muted small" style="margin-top:12px;text-align:center">공부한 만큼 하나씩 열려요<br>꾸민 모습은 랭킹에서 친구들에게 보여요</p>`, { tab: 'deco' });
   void lastPart;
-  $$('.seg button', v).forEach((b) => { b.onclick = () => { decoTab = b.dataset.k; scrDeco(); }; });
+  $$('.seg button', v).forEach((b) => { b.onclick = () => { if (decoSaving) return; decoTab = b.dataset.k; scrDeco(); }; });
   $$('.it', v).forEach((b) => {
     b.onclick = async () => {
       const x = list.find((y) => y.id === b.dataset.id);
       if (!isOpen(x, S)) return toast(`🔒 ${x.cond} 달성하면 열려요`);
+      if (decoSaving) return;
+      decoSaving = true;
+      $$('.it, .seg button', v).forEach((e) => { e.disabled = true; });
       const next = { ...look, [key]: x.id };
       $$('.it', v).forEach((e) => e.classList.toggle('on', e === b));
-      $('#stg').innerHTML = pib(next, 170, 'boing');
-      setTimeout(() => { const p = $('#stg .pw'); if (p) { p.classList.remove('boing'); p.classList.add('m-idle'); } }, 600);
-      const { data, error } = await sb.rpc('set_my_look', { p_look: next });
-      if (error) { toast(error.message); return scrDeco(); }
-      kid.look = data; Object.assign(look, data);
+      const stg = $('#stg', v); stg.innerHTML = pib(next, 170, 'boing');
+      setTimeout(() => { const p = $('.pw', stg); if (p) { p.classList.remove('boing'); p.classList.add('m-idle'); } }, 600);
+      try {
+        const { data, error } = await sb.rpc('set_my_look', { p_look: next });
+        if (error) throw error;
+        kid.look = data; Object.assign(look, data);
+      } catch (e) {
+        toast(e.message || '저장하지 못했어요. 다시 골라 주세요');
+        if (v.isConnected && state.route?.v === 'deco') { stg.innerHTML = pib(look, 170, 'm-idle'); $$('.it', v).forEach(e => e.classList.toggle('on', e.dataset.id === look[key])); }
+      } finally {
+        decoSaving = false;
+        if (v.isConnected) $$('.it, .seg button', v).forEach((e) => { e.disabled = false; });
+      }
     };
   });
 }
@@ -933,11 +1000,13 @@ async function scrDeco() {
 /* 기록 탭 (학생)                                                        */
 /* ------------------------------------------------------------------ */
 async function scrRec() {
+  const viewAtStart = viewVersion;
   const kid = state.own;
   const c = await loadKid(kid);
   await loadAlerts();
   const last = c.reps[c.reps.length - 1], lastW = c.weekly[0];
   const unread = state.alerts.filter((n) => !n.read_at).length;
+  if (viewAtStart !== viewVersion) return;
   const v = mount(`
     ${head('기록', { back: false })}
     ${lastW ? `<button class="card press navBtn" id="lastW" style="display:block;text-align:left"><div class="row" style="justify-content:space-between"><b style="font-weight:900">📊 주간 리포트 · ${WK.weekLabel(lastW.week_start)}</b><span class="pill p-sky">${lastW.test_score != null ? `형성평가 ${lastW.test_score}점` : '학습 포인트'}</span></div><div class="muted small" style="margin-top:6px;font-weight:700">${lastW.gold ? '🏅 기준 통과 · ' : ''}눌러서 한 주 기록 보기</div></button>` : '<div class="card"><b style="font-weight:900">📊 주간 리포트</b><p class="muted small" style="margin-top:4px">금요일 형성평가가 끝나면 여기에 와요</p></div>'}
@@ -957,9 +1026,11 @@ async function scrRec() {
 /* 나 탭 (학생)                                                         */
 /* ------------------------------------------------------------------ */
 async function scrMe() {
+  const viewAtStart = viewVersion;
   const kid = state.own;
   const c = await loadKid(kid);
   const until = kid.nickname_at ? new Date(new Date(kid.nickname_at).getTime() + 14 * DAY) : null;
+  if (viewAtStart !== viewVersion) return;
   const v = mount(`
     ${head('나', { back: false })}
     <div class="meTop">${pib(kid.look, 130, 'm-idle')}<div class="nick">${esc(kid.nickname || '이름을 정해 주세요')}</div>
@@ -1025,6 +1096,7 @@ function reportCard(r, sum, { student = false } = {}) {
 }
 
 async function scrDetail(kid, sessionId) {
+  const viewAtStart = viewVersion;
   const [{ data: sum }, { data: evs }, { data: rep }] = await Promise.all([
     sb.from('session_summaries').select('*').eq('session_id', sessionId).eq('student_id', kid.id).maybeSingle(),
     sb.from('events').select('*').eq('session_id', sessionId).eq('student_id', kid.id).order('created_at'),
@@ -1032,6 +1104,7 @@ async function scrDetail(kid, sessionId) {
   ]);
   if (state.route?.v !== 'detail') return;
   const rows = (evs ?? []).map((e) => { const t = TYPE[e.type] ?? { icon: '•', label: e.type }; return `<div class="row"><span class="when">${hhmm(e.created_at)}</span><div class="grow"><b>${t.icon} ${t.label}</b>${e.memo ? `<p>${esc(e.memo)}</p>` : ''}</div></div>`; }).join('');
+  if (viewAtStart !== viewVersion) return;
   mount(`${head(sum ? `${dayLabel(sum.started_at)} 지옥방` : '지옥방')}
     ${rep ? reportCard(rep, sum, { student: state.mode === 'student' }) : ''}
     <div class="card"><b style="font-weight:900">수업 중 기록</b>
@@ -1055,11 +1128,13 @@ function weekObj(kid, c, ws) {
   return WK.assembleWeek({ student: kid, schedule: c.sched, reps: c.reps, sums: c.sums, wr, prevWr, scores, ws, teacher: wr?.teacher_name, rankText });
 }
 async function scrWeekly(kid, ws) {
+  const viewAtStart = viewVersion;
   const c = await loadKid(kid);
   if (state.mode === 'student' && !state.league) await loadLeague().catch(() => null);
   const s = weekObj(kid, c, ws);
   const B = WK.bar3(s);
   const goldNow = state.mode === 'student' && s.gold && ws === WK.addDays(c.ws, -7);
+  if (viewAtStart !== viewVersion) return;
   mount(`${head('주간 리포트', { right: `<span class="pill p-sky">${s.label}</span>` })}
     ${WK.weeklyCard(s, { rank: state.mode === 'student', ch: kid.look?.ch })}
     ${goldNow && B.all ? '<button class="btn press" id="useGold" style="margin-top:10px;background:linear-gradient(90deg,#F5B700,#FF8A3D)">🏅 황금 오라 바로 쓰기</button>' : ''}
@@ -1073,7 +1148,9 @@ async function scrWeekly(kid, ws) {
   };
 }
 async function scrWeeklies(kid) {
+  const viewAtStart = viewVersion;
   const c = await loadKid(kid);
+  if (viewAtStart !== viewVersion) return;
   mount(`${head('주간 리포트 모아보기')}
     <div class="card"><div class="list">${c.weekly.map((w) => `<div class="row" data-w="${w.week_start}" style="cursor:pointer"><span class="when">${WK.weekLabel(w.week_start)}</span><div class="grow"><b>${w.test_score != null ? `형성평가 ${w.test_score}점` : '이번 주 학습 포인트'}${w.gold ? ' · 🏅' : ''}</b><p>${WK.weekRange(w.week_start)}</p></div><span class="chev">›</span></div>`).join('') || '<p class="empty">아직 받은 주간 리포트가 없어요</p>'}</div></div>`);
   $$('[data-w].row').forEach((r) => { r.onclick = () => go({ v: 'weekly', kid: kid.id, w: r.dataset.w }); });
@@ -1085,10 +1162,12 @@ async function scrWeeklies(kid) {
 /* ------------------------------------------------------------------ */
 let svState = { id: null, step: -1, ans: {} };
 async function scrSurvey(kid, id) {
+  const viewAtStart = viewVersion;
   const c = await loadKid(kid, true);
   const row = c.surveys.find((s) => s.id === id);
   if (!row) {
-    mount(`${head('설문')}<div class="card empty">이미 답했거나 아직 열리지 않은 설문이에요. 고마워요!</div>`);
+    if (viewAtStart !== viewVersion) return;
+  mount(`${head('설문')}<div class="card empty">이미 답했거나 아직 열리지 않은 설문이에요. 고마워요!</div>`);
     return;
   }
   if (row.version === 2) {
@@ -1109,7 +1188,8 @@ async function scrSurvey(kid, id) {
   const f = SV[row.kind];
   const step = svState.step;
   if (step < 0) {
-    mount(`${head('설문', { right: '<span class="pill p-grape">1분 설문</span>' })}
+    if (viewAtStart !== viewVersion) return;
+  mount(`${head('설문', { right: '<span class="pill p-grape">1분 설문</span>' })}
       <div class="hero" style="text-align:center">${pib(kid.look, 110, 'm-idle')}<div class="say" style="margin-top:6px;text-align:left">${f.h1} ${f.lede}</div></div>
       <div class="card"><div class="row" style="justify-content:space-between"><b style="font-weight:900">📝 ${f.t}</b><span class="pill p-gray">${f.items.length}문항</span></div>
         <p class="muted small" style="margin:6px 0 12px">고르기만 하면 바로 다음 문항으로 넘어가요.</p>
@@ -1122,7 +1202,8 @@ async function scrSurvey(kid, id) {
     if (error) { toast(error.message); svState.step = f.items.length - 1; return scrSurvey(kid, id); }
     delete state.kid[kid.id];
     svState = { id: null, step: -1, ans: {} };
-    mount(`<div style="text-align:center;padding-top:60px">${pib(kid.look, 150, 'm-cheer')}
+    if (viewAtStart !== viewVersion) return;
+  mount(`<div style="text-align:center;padding-top:60px">${pib(kid.look, 150, 'm-cheer m-settle')}
       <div class="big" style="margin:14px 0 8px;font-size:26px">고마워요!</div>
       <p class="muted" style="line-height:1.6">${f.thanks}</p>
       <button class="btn press" style="margin-top:22px" id="svBack">확인</button></div>`);
@@ -1137,22 +1218,26 @@ async function scrSurvey(kid, id) {
        <button class="btn press" id="svNext" style="margin-top:12px">${step === f.items.length - 1 ? '제출하기' : '다음'}</button>
        <button class="btn ghost press" id="svSkip" style="margin-top:8px">없어요 · 건너뛰기</button>`
     : it.opts.map((o, i) => `<button class="cand press ${cur?.v === o ? 'sel' : ''}" data-i="${i}">${esc(o)}<small>${it.type === 'scale' ? (i + 1) + ' / ' + it.opts.length : ''}</small></button>`).join('');
+  let advancing = false;
+  if (viewAtStart !== viewVersion) return;
   const v = mount(`<div class="row" style="justify-content:space-between;margin:4px 0 10px"><button class="back press" id="svPrev">‹</button><span class="pill p-grape">${f.t} · ${step + 1} / ${f.items.length}</span></div>
     <div class="bar" style="margin-bottom:22px"><i data-w="${Math.round((step + 1) / f.items.length * 100)}%"></i></div>
     <div class="qTitle">${esc(it.title)}</div>${body}`);
   $('#svPrev').onclick = () => { svState.step--; scrSurvey(kid, id); };
   $$('[data-i]', v).forEach((b) => {
     b.onclick = () => {
+      if (advancing) return; advancing = true;
+      $$('[data-i]', v).forEach((x) => { x.disabled = true; });
       const i = +b.dataset.i;
       svState.ans[it.k] = { v: it.opts[i], i: i + 1 };
       $$('[data-i]', v).forEach((x) => x.classList.toggle('sel', x === b));
-      setTimeout(() => { svState.step++; scrSurvey(kid, id); }, 280);
+      setTimeout(() => { if (!v.isConnected || state.route?.v !== 'survey' || svState.id !== id || svState.step !== step) return; svState.step = step + 1; scrSurvey(kid, id); }, matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 280);
     };
   });
   const nx = $('#svNext');
-  if (nx) nx.onclick = () => { const t = $('#svMemo').value.trim(); if (t) svState.ans[it.k] = { v: t }; else delete svState.ans[it.k]; svState.step++; scrSurvey(kid, id); };
+  if (nx) nx.onclick = () => { if (advancing) return; advancing = true; const t = $('#svMemo').value.trim(); if (t) svState.ans[it.k] = { v: t }; else delete svState.ans[it.k]; svState.step++; scrSurvey(kid, id); };
   const sk = $('#svSkip');
-  if (sk) sk.onclick = () => { delete svState.ans[it.k]; svState.step++; scrSurvey(kid, id); };
+  if (sk) sk.onclick = () => { if (advancing) return; advancing = true; delete svState.ans[it.k]; svState.step++; scrSurvey(kid, id); };
 }
 
 /* ------------------------------------------------------------------ */

@@ -7,8 +7,8 @@
 // 캐시는 앱 셸만 최소한으로 잡습니다. 기록 데이터는 항상 네트워크에서
 // 받아야 하므로 절대 캐시하지 않습니다.
 
-const SHELL = 'shell-v18-app2';
-const SHELL_FILES = ['./', './index.html', './styles.css', './shared.css', './app.js', './look.js', './weekly.js', './rules.js', './survey.js',
+const SHELL = 'jiokpt-checkins-v2-20261025';
+const SHELL_FILES = ['./', './index.html', './styles.css', './shared.css', './app.js', './look.js', './weekly.js',
                      './manifest.webmanifest', './icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {

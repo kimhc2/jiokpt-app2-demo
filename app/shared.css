@@ -105,4 +105,14 @@ color:var(--text);font-family:"Noto Sans KR","Pretendard","Malgun Gothic",sans-s
 .wr.img .wupk{font-size:15px}.wr.img .wupr b{font-size:21px}.wr.img .wupt{font-size:16px}.wr.img .whl{font-size:15px}
 .wr.img .wbt{font-size:16px}.wr.img .wbr{font-size:14px}.wr.img .wbg b{font-size:15px}
 
-@media (prefers-reduced-motion:reduce){.jp2 *, .jp2 *:before, .jp2 *:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+/* 학습 체크인: 기존 색·타이포를 사용하고 선택/서술 입력만 보완 */
+.checkin-view{max-width:560px;margin:0 auto;padding:12px;box-sizing:border-box}
+.checkin-view .cand{display:block;width:100%;text-align:left;margin:8px 0;padding:14px 16px;border:1px solid #eadbd0;border-radius:16px;background:#fff;color:inherit;font:inherit;font-weight:700;white-space:normal;overflow-wrap:anywhere}
+.checkin-view .cand.sel{background:var(--fire,#f36b3f);color:#fff;border-color:transparent;transform:none}
+.checkin-view .qTitle{font-size:21px;line-height:1.5;font-weight:900;margin:16px 0}
+.checkin-view textarea.memo,.svd textarea.memo{display:block;width:100%;height:110px;box-sizing:border-box;padding:12px;border:1px solid #eadbd0;border-radius:12px;resize:vertical;font:inherit}
+.checkin-view select.sel{max-width:100%;width:100%;height:42px;margin:8px 0}
+.checkin-view .stack{display:flex;flex-direction:column;gap:8px}
+.checkin-view .error{color:#a52b24;white-space:normal}
+.checkin-prompt .wrap{flex-wrap:wrap}.checkin-prompt .btn{width:auto}
+@media(prefers-reduced-motion:reduce){.checkin-view *{transition:none!important;animation:none!important}}

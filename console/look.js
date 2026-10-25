@@ -7,7 +7,7 @@ export const CHARS = [
   { id: 'pi_red',   name: '파이뿔',     cond: '처음부터' },
   { id: 'pi_sky',   name: '하늘 파이뿔', cond: '첫 오공완',        need: ['ok', 1] },
   { id: 'pi_mint',  name: '민트 파이뿔', cond: '오공완 5번',       need: ['ok', 5] },
-  { id: 'pi_grape', name: '포도 파이뿔', cond: '랭킹 TOP3 들기',   need: ['top3', 1] },
+  { id: 'pi_grape', name: '포도 파이뿔', cond: '마감한 주 기본 목표 80점 달성', need: ['goal_weeks', 1] },
   { id: 'pi_pink',  name: '딸기 파이뿔', cond: '오공완 3번',       need: ['ok', 3] },
   { id: 'root',     name: '루트뿔',     cond: '형성평가 80점',    need: ['best_test', 80] },
   { id: 'inf',      name: '무한뿔',     cond: '연속 오공완 14번', need: ['streak_best', 14] },
@@ -17,6 +17,7 @@ export const CHARS = [
 
 // 소품 15개 — 칸은 '소품' 하나라 한 번에 하나만 씁니다 (10/23 결정)
 export const ITEMS = [
+  { id: 'comet_pin', name: '혜성 머리핀', part: '머리', cond: '추가 노력 별 7개', need: ['extra_days', 7] },
   { id: 'none',       name: '없음' },
   { id: 'ribbon',     name: '리본',        part: '머리', cond: '처음부터' },
   { id: 'star_pin',   name: '별 머리핀',    part: '머리', cond: '첫 오공완',          need: ['ok', 1] },
@@ -29,25 +30,26 @@ export const ITEMS = [
   { id: 'scarf',      name: '목도리',      part: '목·몸', cond: '2주 연속 완주',          need: ['weeks', 2] },
   { id: 'bowtie',     name: '나비넥타이',   part: '목·몸', cond: '형성평가 70점',     need: ['best_test', 70] },
   { id: 'cap',        name: '학사모',      part: '머리', cond: '형성평가 +10점 성장', need: ['test_growth', 10] },
-  { id: 'medal',      name: '메달',        part: '목·몸', cond: '랭킹 TOP3 들기',    need: ['top3', 1] },
+  { id: 'medal',      name: '메달',        part: '목·몸', cond: '마감한 주 기본 목표 80점 달성', need: ['goal_weeks', 1] },
   { id: 'wings',      name: '작은 악마 날개', part: '목·몸', cond: '연속 오공완 10번', need: ['streak_best', 10] },
   { id: 'halo',       name: '천사 고리',    part: '머리', cond: '황금 오라 받기',     need: ['gold_ever', 1] },
-  { id: 'crown',      name: '왕관',        part: '머리', cond: '랭킹 1위',           need: ['rank1', 1] },
+  { id: 'crown',      name: '왕관',        part: '머리', cond: '마감한 주 기본 목표 100점 완주', need: ['full_goal_weeks', 1] },
 ];
 
 export const EFFECTS = [
+  { id: 'starlight', name: '도전 별빛', cond: '추가 노력 별 3개', need: ['extra_days', 3] },
   { id: 'none',   name: '없음' },
   { id: 'gold',   name: '황금 오라',  cond: '지난주 기준 통과', weekly: '이번 주 한정', need: ['gold_now', 1] },
   { id: 'spark',  name: '반짝반짝',   cond: '처음부터' },
   { id: 'orbit',  name: '수학 궤도',  cond: '누적 500문제',     need: ['solved', 500] },
   { id: 'aura',   name: '불꽃 오라',  cond: '연속 오공완 7번',  need: ['streak_best', 7] },
   { id: 'hearts', name: '하트 퐁퐁',  cond: '오공완 7번',       need: ['ok', 7] },
-  { id: 'ring',   name: '무지개 링',  cond: '리그 승급',        need: ['promoted', 1] },
+  { id: 'ring',   name: '무지개 링',  cond: '꾸준함 등급 상승',        need: ['promoted', 1] },
 ];
 
 const statVal = (s, k) => (k === 'gold_now' ? (s?.gold_now ? 1 : 0) : Number(s?.[k] ?? 0));
-export const isOpen = (x, stats) => !x.need || statVal(stats, x.need[0]) >= x.need[1];
-export const progress = (x, stats) => (x.need ? Math.min(1, statVal(stats, x.need[0]) / x.need[1]) : 1);
+export const isOpen = (x, stats) => stats?.earned?.includes(x.id) || !x.need || statVal(stats, x.need[0]) >= x.need[1];
+export const progress = (x, stats) => (stats?.earned?.includes(x.id) ? 1 : x.need ? Math.min(1, statVal(stats, x.need[0]) / x.need[1]) : 1);
 
 // 스티커 그림이 준비된 소품은 PNG(투명 배경, 캐릭터 411×520 칸 + 위로 150px = 411×670)를 씁니다.
 // 없는 것은 아래 임시 SVG 를 그립니다. 그림을 넣으면 이 목록에 id 만 추가하면 됩니다.
@@ -58,6 +60,7 @@ const ITEM_BACK = new Set(['wings']);
 
 // 임시 소품 그림 (캐릭터 그림 좌표 411×520 기준)
 const ITEM_SVG = {
+  comet_pin: '<g transform="translate(92 108) rotate(-12)"><path d="M0 -30 L8 -10 L29 -8 L13 6 L17 28 L-2 17 L-21 28 L-17 6 L-32 -8 L-10 -11Z" fill="#86E3CE" stroke="#277E8E" stroke-width="5"/><path d="M20 8 Q68 10 92 50 Q55 32 17 27Z" fill="#FFD86B" stroke="#BF8737" stroke-width="4"/><circle cx="61" cy="-5" r="5" fill="#FFD86B"/><circle cx="83" cy="11" r="3" fill="#86E3CE"/></g>',
   none: '',
   ribbon: `<g transform="translate(300 118) rotate(18)"><path d="M0 0 C-34 -30 -52 -4 -40 16 C-30 30 -10 18 0 0 Z" fill="#FF6FA8" stroke="#C93A74" stroke-width="4"/><path d="M0 0 C34 -30 52 -4 40 16 C30 30 10 18 0 0 Z" fill="#FF6FA8" stroke="#C93A74" stroke-width="4"/><path d="M-6 6 L-20 40 L-6 34 L2 44 L6 8Z" fill="#FF8DBB" stroke="#C93A74" stroke-width="3"/><circle r="11" fill="#FF97C2" stroke="#C93A74" stroke-width="4"/><path d="M-30 -8 C-26 -14 -20 -14 -16 -10" stroke="#fff" stroke-width="4" fill="none" stroke-linecap="round" opacity=".8"/></g>`,
   flower: `<g transform="translate(96 108)">${[0, 72, 144, 216, 288].map((a) => `<ellipse cx="0" cy="-17" rx="12" ry="17" transform="rotate(${a})" fill="#FFE27A" stroke="#E0A400" stroke-width="3"/>`).join('')}<circle r="10" fill="#FF8A3D" stroke="#D7621A" stroke-width="3"/><circle cx="-3" cy="-3" r="3" fill="#fff" opacity=".8"/></g>`,
@@ -77,6 +80,7 @@ const ITEM_SVG = {
 };
 
 export function fxHTML(e, front) {
+  if (e === 'starlight' && front) return [[12,16,0],[84,20,0.5],[9,58,1],[85,65,1.5]].map(([x,y,d]) => `<span class="spark" style="left:${x}%;top:${y}%;animation-delay:${d}s;color:#60C7CA;text-shadow:0 0 7px #60C7CA">✧</span>`).join('');
   if (e === 'gold' && !front) return '<div class="gold"><i></i></div>';
   if (e === 'gold' && front) return [[14, 30, 0], [80, 22, 0.7], [86, 60, 1.3], [10, 70, 1.9], [50, 8, 1]].map(([x, y, d]) => `<span class="ember" style="left:${x}%;top:${y}%;animation-delay:${d}s">✦</span>`).join('');
   if (e === 'aura' && !front) return '<div class="aura"></div>';

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>수학지옥pt · 선생님 콘솔</title>
-<link rel="stylesheet" href="shared.css?v=checkins3">
+<link rel="stylesheet" href="shared.css?v=ranking3">
 <link rel="stylesheet" href="styles.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -18,6 +18,7 @@
     <button class="navbtn" data-go="roster">학생 관리</button>
     <button class="navbtn" data-go="sent">보낸 리포트</button>
     <button class="navbtn" data-go="weekly">주간 리포트 (금)</button>
+    <button class="navbtn" data-go="ranking">랭킹·보상</button>
     <button class="navbtn" data-go="survey">설문<span id="svDot" class="navdot" hidden></span></button>
     <button class="navbtn" data-go="health">알림 현황<span id="healthDot" class="navdot" hidden></span></button>
     <button class="navbtn" data-go="staff" id="navStaff" hidden>선생님 관리</button>
@@ -225,6 +226,7 @@
     </div>
   </section>
 
+  <section id="view-ranking" class="view jp2" hidden><div class="console"><h2>랭킹·보상</h2><p>서버가 계산한 기본·초과·형성평가·보너스 내역입니다. 꾸준함 등급과 완주 보상은 기본 목표로 별도 판단합니다.</p><div class="row wrap"><div class="seg" id="rankingScope"><button data-scope="mine">내 학생</button><button data-scope="all">전체</button></div><button class="btn sm" id="rankingReload">새로고침</button></div><div class="tblWrap"><table class="ctab" id="rankingTable"></table></div><div id="rankingDetails"></div></div></section>
   <!-- 설문 — 실제 경험 이후 선택 응답 · 조정 안내와 개선 확인까지 관리 -->
   <section id="view-survey" class="view jp2" hidden>
     <div class="console">
@@ -381,11 +383,12 @@
       <label>맞은 문제 수
         <input type="number" id="rpCorrect" min="0" max="999" inputmode="numeric">
       </label>
-      <label>순공시간 (분)
-        <input type="number" id="rpStay" min="0" max="1440" inputmode="numeric">
+      <label>확인한 학습시간 (분)
+        <input type="number" id="rpStay" required min="0" max="1440" inputmode="numeric">
       </label>
     </div>
 
+    <p class="muted small">쉬거나 자리를 비운 시간을 빼고 입력해 주세요. 같은 날 기록은 합산하며, 목표 초과량은 경쟁 점수 대신 추가 노력 별로 인정합니다(문제125% 또는 확인시간+15분, 하루1개).</p>
     <div class="calcBox" id="rpCalc"></div>
 
     <label>메모 <span class="muted small">(선택 · 보호자 리포트에 함께 표시됩니다)</span>
@@ -422,6 +425,6 @@
 <div id="toast" class="toast" hidden></div>
 
 <script src="config.js"></script>
-<script type="module" src="app.js?v=checkins3"></script>
+<script type="module" src="app.js?v=ranking3"></script>
 </body>
 </html>

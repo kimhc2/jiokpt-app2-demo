@@ -10,3 +10,12 @@ export function normalizeTest(total, correct, score = null) {
 }
 
 export const notificationChanged = (before, after) => before !== after && after !== null;
+
+// 표시용 산식 검증 도구. 실제 화면의 총점은 서버가 반환한 항목을 사용합니다.
+export const formatPoints = n => Number(n || 0).toLocaleString('ko-KR',{maximumFractionDigits:2});
+export function studyDayScore(goal,minutesGoal,solved,minutes) {
+ return Math.round((60*Math.max(0,Number(solved||0))/Math.max(1,Number(goal||1))+40*Math.max(0,Number(minutes||0))/Math.max(1,Number(minutesGoal||1)))*100)/100;
+}
+export function rankingTestBonus(score,prev) {
+ return score==null?0:prev!=null&&(score>prev||(score>=90&&prev>=90))?5:0;
+}

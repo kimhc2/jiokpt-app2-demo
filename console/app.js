@@ -1,4 +1,4 @@
-import { normalizeTest } from './rules.js';
+import { normalizeTest, studyDayScore } from './rules.js';
 // import 를 정적으로 쓰면 CDN 을 못 받았을 때 모듈 전체가 실행되지 않아
 // 설정 안내조차 뜨지 않고 죽은 화면만 남습니다. 그래서 검사를 먼저 하고
 // 라이브러리는 동적으로 불러옵니다.
@@ -249,7 +249,7 @@ function initScope() {
 }
 
 function paintScope() {
-  $$('#scopeSeg button, #sentScope button, #wkScope button, #svScope button').forEach((b) => b.classList.toggle('on', b.dataset.scope === state.scope));
+  $$('#scopeSeg button, #sentScope button, #wkScope button, #svScope button, #rankingScope button').forEach((b) => b.classList.toggle('on', b.dataset.scope === state.scope));
 }
 
 $$('#scopeSeg button').forEach((b) => b.onclick = () => {
@@ -271,13 +271,14 @@ $$('#sentScope button').forEach((b) => b.onclick = () => {
 });
 
 // 주간 리포트 · 설문 화면의 범위 버튼도 같은 설정을 씁니다
-$$('#wkScope button, #svScope button').forEach((b) => b.onclick = () => {
+$$('#wkScope button, #svScope button, #rankingScope button').forEach((b) => b.onclick = () => {
   if (!discardWeekly()) return;
   state.scope = b.dataset.scope;
   pref.set('scope', state.scope);
   paintScope();
   if (!$('#view-weekly').hidden) loadWeeklyPage().catch(fail);
   if (!$('#view-survey').hidden) loadSurveyPage().catch(fail);
+  if (!$('#view-ranking').hidden) loadRankingPage().catch(fail);
 });
 
 // '내 학생' 보기일 때 이 학생을 보여 줄지
@@ -562,7 +563,7 @@ async function startSession(student) {
 }
 
 function endSession(sess) {
-  openReport(sess);
+  openReport(sess).catch(fail);
 }
 
 /* ------------------------------------------------------------------ */
@@ -573,10 +574,15 @@ function endSession(sess) {
 /* ------------------------------------------------------------------ */
 let reportFor = null;
 
-function openReport(sess) {
+async function openReport(sess, saved = null) {
   reportFor = sess;
   const st = state.students.find((x) => x.id === sess.student_id) ?? {};
-  const mins = Math.max(0, Math.round((Date.now() - new Date(sess.started_at)) / 60000));
+  const mins = Math.max(0, Math.round((new Date(sess.ended_at || Date.now()) - new Date(sess.started_at)) / 60000));
+  const planned = await sb.from('study_week_days').select('*').eq('student_id', sess.student_id).eq('day', WK.kstDayKey(sess.started_at)).maybeSingle();
+  if (planned.error) throw planned.error;
+  if (reportFor !== sess) return;
+  sess.goalSnapshot = planned.data?.goal_problems || saved?.study_goal || st.daily_goal_problems;
+  sess.minutesSnapshot = planned.data?.goal_minutes || saved?.study_minutes || st.mandatory_minutes;
 
   $('#rpWho').textContent = `${sess.student_name} 데일리 리포트`;
   $('#rpMeta').textContent =
@@ -587,8 +593,12 @@ function openReport(sess) {
   $('#rpAssigned').value = st.daily_goal_problems ?? (st.stage ?? 1) * 25;
   $('#rpSolved').value = '';
   $('#rpCorrect').value = '';
-  $('#rpStay').value = mins;
-  $('#rpMemo').value = '';
+  $('#rpStay').value = saved?.stay_minutes ?? '';
+  $('#rpStay').placeholder = `전체 체류 ${mins}분 · 실제 학습시간 입력`;
+  if (saved) { $('#rpAssigned').value = saved.assigned; $('#rpSolved').value = saved.solved; $('#rpCorrect').value = saved.correct; }
+  $('#rpSkip').hidden = !!sess.editing;
+  $('#rpSubmit').textContent = sess.editing ? '기록 정정 저장' : '종료하고 리포트 발송';
+  $('#rpMemo').value = saved?.memo || '';
   $('#rpError').hidden = true;
 
   $('#reportModal').hidden = false;
@@ -639,12 +649,12 @@ function updateCalc() {
   // 오공완 = 순공 의무 시간 이상 또는 할당량 완료 (10/22 확정)
   const taskOk = assigned > 0 && solved >= assigned;
   const ok = stay >= mustMin || taskOk;
-  const pts = (taskOk ? 6 : 0) + (stay >= mustMin ? 4 : 0) + Math.min(4, Math.max(0, Math.floor((stay - mustMin) / 30)));
+  const pts = studyDayScore(reportFor.goalSnapshot || st.daily_goal_problems || st.stage * 25, reportFor.minutesSnapshot || mustMin, solved, stay);
 
   const v = el('div', 'verdict ' + (ok ? 'ok' : 'bad'));
   v.textContent = (ok
     ? `오공완 · ${[stay >= mustMin && '순공 1시간 채움', taskOk && '할당량 완료'].filter(Boolean).join(' · ')}`
-    : `아쉬운 날 — 순공 ${stay}분 (1시간 미만) · 할당 ${completion}%`) + ` · 학생 랭킹 +${pts}점`;
+    : `아쉬운 날 — 순공 ${stay}분 (1시간 미만) · 할당 ${completion}%`) + ` · 이번 기록 목표 달성 ${pts}% · 같은 날 기록 합산 후 주간 반영`;
   box.append(v);
 }
 
@@ -663,7 +673,7 @@ $('#rpSkip').onclick = async () => {
   if (!sess) return;
   if (!confirm(
     `${sess.student_name} 학생의 수업을 리포트 없이 종료할까요?\n\n` +
-    `보호자에게는 기록만 담긴 간단한 안내가 갑니다. 나중에 리포트를 추가할 수 없습니다.`
+    `보호자에게는 기록만 담긴 간단한 안내가 갑니다. 보낸 리포트 화면에서 나중에 입력할 수 있습니다.`
   )) return;
   closeReport();
   await finishSession(sess, null);
@@ -685,7 +695,8 @@ $('#rpSubmit').onclick = async () => {
   if (!Number.isFinite(correct) || correct < 0 || $('#rpCorrect').value === '')
     bad.push('맞은 문제 수를 입력하세요.');
   if (correct > solved) bad.push('맞은 문제 수가 푼 문제 수보다 클 수 없습니다.');
-  if (!Number.isFinite(stay) || stay < 0) bad.push('체류 시간을 확인하세요.');
+  if ($('#rpStay').value === '' || !Number.isInteger(stay) || stay < 0) bad.push('쉬거나 자리를 비운 시간을 제외한 실제 학습시간을 입력하세요.');
+  if (sess.editing && !$('#rpMemo').value.trim()) bad.push('정정 사유를 메모에 남겨 주세요.');
 
   if (bad.length) {
     $('#rpError').innerHTML = bad.map(esc).join('<br>');
@@ -697,10 +708,17 @@ $('#rpSubmit').onclick = async () => {
   btn.disabled = true;
   btn.textContent = '저장 중...';
   const payload = { assigned, solved, correct, stay, memo: $('#rpMemo').value.trim() };
-  closeReport();
-  await finishSession(sess, payload);
-  btn.disabled = false;
-  btn.textContent = '종료하고 리포트 발송';
+  try {
+    if (sess.editing) {
+      const result = await sb.rpc('save_session_report', { p_session: sess.session_id, p_assigned: assigned, p_solved: solved, p_correct: correct, p_stay_min: stay, p_memo: payload.memo });
+      if (result.error) throw result.error;
+      closeReport();
+      await sb.functions.invoke('notify', { body: { action: 'session_summary', session_id: sess.session_id, corrected: true } });
+      await loadSent(); toast('기록을 정정했습니다. 해당 주 점수와 마감 결과도 다시 반영됐어요.');
+    } else { closeReport(); await finishSession(sess, payload); }
+  } catch (error) { fail(error); } finally { btn.disabled = false; }
+
+  btn.textContent = reportFor?.editing ? '기록 정정 저장' : '종료하고 리포트 발송';
 };
 
 // 종료 → 리포트 저장 → 보호자 발송. 순서가 중요합니다.
@@ -1693,6 +1711,9 @@ async function loadSent() {
       rb.onclick = () => openParentReport(s, n).catch(fail);
       bc.append(rb, document.createTextNode(' '));
     }
+    const edit = el('button', 'ghost tiny', r ? '정정' : '리포트 입력');
+    edit.onclick = () => openReport({ ...s, editing: true }, r).catch(fail);
+    bc.append(edit);
     const b = el('button', 'ghost tiny', '기록');
     b.onclick = () => openSummary(s).catch(fail);
     bc.append(b);
@@ -1707,6 +1728,7 @@ async function loadSent() {
 const PARENT_APP = window.PARENT_APP_URL || 'https://lambent-truffle-e3280c.netlify.app';
 
 function parentReportCard(r, sum) {
+  r = {...r, participation_ok: r.day_ok ?? r.participation_ok};
   const card = el('div', 'report');
   const pin  = (n) => Math.max(0, Math.min(100, n));
 
@@ -1802,13 +1824,7 @@ function parentReportCard(r, sum) {
       cls: r.stay_ok ? 'ok' : rampCls(stayPct),
       note: r.stay_ok ? '의무 시간 채움' : `의무까지 ${r.mandatory_minutes - r.stay_minutes}분` }));
 
-  const pc = r.grade_percentile;
-  body.append(metric('학습량 순위', val(`상위 ${pc}%`),
-    100 - pc,
-    pc <= 10 ? 'jade' : pc <= 30 ? 'gold' : pc <= 60 ? 'flame' : 'fire',
-    { tag: pc <= 10 ? '최상위' : pc <= 30 ? '상위' : pc <= 60 ? '중위' : '하위',
-      cls: pc <= 10 ? 'ok' : pc <= 30 ? 'warn' : pc <= 60 ? 'mid' : 'bad',
-      note: `같은 학년 기준` }));
+
 
   if (sum) {
     const neg = sum.negative_count ?? 0;
@@ -2132,7 +2148,7 @@ $('#addTeacherForm').addEventListener('submit', async (ev) => {
 /*                                                                     */
 /* 학생마다 카드가 있고, 기록으로 정할 수 있는 건 미리 눌러져 있습니다.     */
 /* 다른 것만 바꾸고 제출하면 전원 리포트가 만들어지고(아직 안 보임),        */
-/* '앱으로 보내기'를 눌러야 학생 · 보호자 앱에 도착하고 랭킹에 들어갑니다.   */
+/* '앱으로 보내기'를 눌러야 학생 · 보호자 앱에 도착하고 성장 기록에 남습니다.   */
 /* 카드 · 계산은 shared/weekly.js — 학생 앱과 같은 코드라 화면이 똑같습니다. */
 /* ------------------------------------------------------------------ */
 const wkS = { ws: WK.weekStartOf(), list: [], wr: {}, published: {}, dirty: false };
@@ -2147,6 +2163,8 @@ function discardWeekly() {
 }
 async function loadWeeklyPage() {
   if (!discardWeekly()) return;
+  const prepared = await sb.rpc('prepare_study_week', { p_week: wkS.ws });
+  if (prepared.error) throw prepared.error;
   const ws = wkS.ws, thisWs = WK.weekStartOf();
   $('#wkTitle').textContent = ws === thisWs ? '이번 주 주간 리포트' : `${WK.weekLabel(ws)} 주간 리포트`;
   $('#wkRange').textContent = WK.weekRange(ws);
@@ -2156,14 +2174,15 @@ async function loadWeeklyPage() {
   const ids = studs.map((s) => s.id);
   if (!ids.length) { $('#wkCards').innerHTML = '<p class="empty">학생이 없습니다.</p>'; return; }
   const from = WK.parseDay(WK.addDays(ws, -7)).toISOString(), to = WK.parseDay(WK.addDays(ws, 7)).toISOString();
-  const [reps, sums, sched, wrs, drafts] = await Promise.all([
+  const [reps, sums, sched, wrs, drafts, plans] = await Promise.all([
     sb.from('daily_reports').select('*').in('student_id', ids).gte('started_at', from).lt('started_at', to),
     sb.from('session_summaries').select('session_id, student_id, negative_count').in('student_id', ids).gte('started_at', from).lt('started_at', to),
     sb.from('student_schedule').select('*').in('student_id', ids),
     sb.from('weekly_reports').select('*').in('student_id', ids).lte('week_start', ws).order('week_start', { ascending: false }),
     sb.from('weekly_report_drafts').select('*').in('student_id', ids).eq('week_start', ws),
+    sb.from('study_week_days').select('*, study_week_members(stage)').in('student_id', ids).gte('week_start', WK.addDays(ws, -7)).lte('week_start', ws),
   ]);
-  for (const r of [reps, sums, sched, wrs, drafts]) if (r.error) throw r.error;
+  for (const r of [reps, sums, sched, wrs, drafts, plans]) if (r.error) throw r.error;
   const by = (rows, id) => (rows.data ?? []).filter((x) => x.student_id === id);
   wkS.wr = {}; wkS.published = {};
   wkS.list = studs.map((st) => {
@@ -2176,7 +2195,7 @@ async function loadWeeklyPage() {
       student: st, schedule: by(sched, st.id), reps: by(reps, st.id), sums: by(sums, st.id), wr,
       prevWr: mine.find((w) => w.week_start === WK.addDays(ws, -7)) ?? null,
       scores: mine.filter((w) => w.week_start < ws && w.sent_at && w.test_score != null).map((w) => w.test_score),
-      ws, teacher: wr?.teacher_name || state.me.name,
+      ws, teacher: wr?.teacher_name || state.me.name, plans: by(plans, st.id).map(p => ({...p, stage: p.study_week_members?.stage})),
     });
     const normalized = normalizeTest(s.test.total, s.test.correct, s.score);
     s.test = { ...s.test, ...normalized }; s.score = normalized.score == null ? '' : String(normalized.score);
@@ -2297,7 +2316,7 @@ const wkFile = (s) => `${s.n}_주간레포트.png`;
 function drawGallery() {
   const g = $('#wkGallery');
   const unsent = wkS.list.filter((s) => !wkS.wr[s.id]?.sent_at);
-  g.innerHTML = `<div class="gal-h"><div><b style="font-size:18px;font-weight:900">주간 리포트 ${wkS.list.length}장이 만들어졌어요</b><div class="muted small">보호자에게 가는 화면 그대로입니다. '앱으로 보내기'를 누르면 학생 · 보호자 앱에 도착하고, 형성평가 점수가 랭킹에 바로 들어가요.</div></div>
+  g.innerHTML = `<div class="gal-h"><div><b style="font-size:18px;font-weight:900">주간 리포트 ${wkS.list.length}장이 만들어졌어요</b><div class="muted small">보호자에게 가는 화면 그대로입니다. '앱으로 보내기'를 누르면 학생 · 보호자 앱에 도착하고, 형성평가는 성장 기록으로 남으며 경쟁 점수에는 합산하지 않아요.</div></div>
     <div class="row"><button class="btn sm ghost press" id="sendApp" style="width:auto;padding:0 16px" ${unsent.length ? '' : 'disabled'}>${unsent.length ? `앱으로 보내기 (${unsent.length}명)` : '모두 보냈어요'}</button><button class="btn sm press" id="zipAll" style="width:auto;padding:0 18px">⬇ 전체 저장 (zip)</button></div></div>
     <div class="gal">${wkS.list.map((s, i) => `<div class="gi"><div class="gthumb"><div class="gscale">${WK.weeklyCard({ ...s, sent: wkS.wr[s.id]?.sent_at })}</div></div><div class="gname">${esc(wkFile(s))}</div><button class="btn sm ghost press one" data-i="${i}">이 장만 저장</button></div>`).join('')}</div>`;
   g.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -2310,7 +2329,7 @@ function confirmWeeklySend(count) {
     const dialog = document.createElement('dialog');
     dialog.setAttribute('aria-labelledby', 'weeklySendTitle');
     dialog.style.cssText = 'border:1px solid #ddd;border-radius:18px;padding:24px;max-width:420px;width:calc(100% - 32px);margin:auto;box-shadow:0 12px 40px #0003';
-    dialog.innerHTML = `<h3 id="weeklySendTitle">${count}명에게 주간 리포트 보내기</h3><p style="margin:12px 0 20px;line-height:1.6">학생·보호자 앱에 공개되고 형성평가 점수가 랭킹에 반영됩니다.</p><div style="display:flex;gap:10px;justify-content:flex-end"><button class="ghost" data-cancel>취소</button><button class="primary" data-confirm>${count}명에게 보내기</button></div>`;
+    dialog.innerHTML = `<h3 id="weeklySendTitle">${count}명에게 주간 리포트 보내기</h3><p style="margin:12px 0 20px;line-height:1.6">학생·보호자 앱에 공개되고 형성평가는 성장 기록으로 남습니다. 경쟁 점수는 학습 목표 달성률로 계산됩니다.</p><div style="display:flex;gap:10px;justify-content:flex-end"><button class="ghost" data-cancel>취소</button><button class="primary" data-confirm>${count}명에게 보내기</button></div>`;
     const finish = (yes) => { dialog.close(); dialog.remove(); resolve(yes); };
     dialog.querySelector('[data-cancel]').onclick = () => finish(false);
     dialog.querySelector('[data-confirm]').onclick = () => finish(true);
@@ -2331,7 +2350,7 @@ async function sendWeekly() {
     if (!data?.ok || data.count !== unsent.length) throw new Error('일부 리포트의 알림 발송을 확인하지 못했습니다. 다시 시도해 주세요');
     const { error: markError } = await sb.from('weekly_report_drafts').update({ sent_at: new Date().toISOString() }).eq('week_start', wkS.ws).in('student_id', unsent.map(s => s.id));
     if (markError) throw markError;
-    toast(`${data.count}명에게 보냈습니다 · 형성평가 점수는 랭킹에 바로 반영됐어요`);
+    toast(`${data.count}명에게 보냈습니다 · 성장 기록에 반영했어요`);
     await loadWeeklyPage(); drawGallery();
   } catch (e) { fail(e); btn.disabled = false; btn.textContent = '앱으로 보내기 다시 시도'; }
 }
@@ -2451,6 +2470,7 @@ function go(to) {
   else if (to === 'health') { show('health'); loadHealth().catch(fail); }
   else if (to === 'sent')   { show('sent'); loadSent().catch(fail); }
   else if (to === 'weekly') { show('weekly'); paintScope(); loadWeeklyPage().catch(fail); }
+  else if (to === 'ranking') { show('ranking'); paintScope(); loadRankingPage().catch(fail); }
   else if (to === 'survey') { show('survey'); paintScope(); loadSurveyPage().catch(fail); }
   else if (to === 'staff')  { if (state.me?.role !== 'admin') return; show('staff'); renderStaff().catch(fail); }
   else                      { show(to); }
@@ -2462,3 +2482,15 @@ document.querySelector('nav')?.addEventListener('click', (e) => {
   if (!confirm('저장하지 않은 주간 리포트 입력을 버리고 이동할까요?')) { e.preventDefault(); e.stopImmediatePropagation(); }
   else wkS.dirty = false;
 }, true);
+
+async function loadRankingPage(){
+ const studs=state.students.filter(s=>inScope(s.id)),rows=await Promise.all(studs.map(async s=>{
+  const {data,error}=await sb.rpc('staff_league',{p_student:s.id});if(error)throw error;
+  const stats=await sb.rpc('student_stats',{p_student:s.id});if(stats.error)throw stats.error;
+  return {s,L:data,p:data?.personal||{},stats:stats.data||{}};
+ }));
+ const f=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:2});
+ $('#rankingTable').innerHTML=`<thead><tr><th>학생</th><th>기본</th><th>초과</th><th>형성평가</th><th>보너스</th><th>총점</th><th>현재 순위</th><th>추가 노력 별</th></tr></thead><tbody>${rows.map(({s,L,p,stats})=>{const m=L?.members?.find(m=>m.me);return `<tr><td>${esc(s.name)} · STAGE ${L?.stage||s.stage}</td><td>${f(p.base_points)}</td><td>${f(p.extra_points)}</td><td>${f(p.test_points)}</td><td>${f(p.growth_points)}</td><td><b>${f(p.points)}</b></td><td>${L?.eligible&&m?`${m.ties>1?'공동 ':''}${m.rank}위 / ${L.members.length}명`:'준비주·목표 대기'}</td><td>${stats.extra_days||0}개</td></tr>`}).join('')}</tbody>`;
+ $('#rankingDetails').innerHTML=`<div class="card"><b>같은 계산을 학생 화면에서도 사용합니다</b><p>기본 학습은 문제 60%·시간40%로 예정일 평균을 내며 최대100점입니다. 초과 학습은 같은 비중으로 상한 없이 가산하고, 예정일 밖 공부도 주간 예정일 수로 나누어 가산합니다. 발송한 형성평가 점수÷4 최대25점 + 직전 시험보다 상승하거나 직전·현재 모두90점 이상이면5점입니다. 첫 시험 보너스는 없고, 둘 다 해당해도5점 한 번입니다.</p><p>주중 순위는 임시입니다. 동점은 공동 순위입니다. 결석·연속·완주·등급 상승은 시험이나 초과 점수로 대신하지 않습니다. 이번 주 시작 시 고정한 목표·그룹을 사용합니다.</p><p>별은 문제25% 초과 또는 확인한 학습시간15분 초과 시 하루1개입니다. 별3개는 도전 별빛,7개는 혜성 머리핀입니다. 기본80점 달성 주는 포도 파이뿔·메달, 기본100점 완주 주는 왕관·꾸준함 등급 상승입니다.</p></div>`;
+}
+$('#rankingReload').onclick=()=>loadRankingPage().catch(fail);

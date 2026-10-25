@@ -69,15 +69,16 @@ function weekRows(ws, schedule, reps, sums) {
   const days = new Map();
   for (const sc of schedule ?? []) {
     if (sc.kind !== 'jiok') continue;
-    const k = addDays(ws, sc.weekday - 1);
-    if (k < today || (k === today && Date.now() >= new Date(k + 'T00:00:00+09:00').getTime() + (sc.end_min ?? 1440) * 60000)) days.set(k, { d: dLabel(k), key: k, goal: 0, sol: 0, cor: 0, min: 0, warn: 0, n: 0 });
+    const k = sc.day || addDays(ws, sc.weekday - 1);
+    if (k < ws || k > addDays(ws, 6)) continue;
+    if (sc.ends_at ? Date.now() >= new Date(sc.ends_at).getTime() : (k < today || (k === today && Date.now() >= new Date(k + 'T00:00:00+09:00').getTime() + (sc.end_min ?? 1440) * 60000))) days.set(k, { d: dLabel(k), key: k, goal: sc.goal_problems || 0, must: sc.goal_minutes || 60, planned: !!sc.day, sol: 0, cor: 0, min: 0, warn: 0, n: 0 });
   }
   for (const r of reps ?? []) {
     const k = kstDayKey(r.started_at);
     if (k < ws || k > addDays(ws, 6)) continue;
     const x = days.get(k) ?? { d: dLabel(k), key: k, goal: 0, sol: 0, cor: 0, min: 0, warn: 0, n: 0 };
-    x.goal += r.assigned; x.sol += r.solved; x.cor += r.correct; x.min += r.stay_minutes;
-    x.warn += warnBy[r.session_id] ?? 0; x.n++; x.ok = (x.ok !== false && r.participation_ok);
+    if (!x.planned) x.goal += r.assigned; x.sol += r.solved; x.cor += r.correct; x.min += r.stay_minutes;
+    x.warn += warnBy[r.session_id] ?? 0; x.n++; x.ok = x.sol >= x.goal || x.min >= (x.must || r.mandatory_minutes || 60);
     days.set(k, x);
   }
   // 빠진 날의 할당량은 그 학생 스테이지로
@@ -89,7 +90,7 @@ export function wkSum(jb) {
   const sol = sum('sol'), cor = sum('cor');
   return {
     sol, goal: sum('goal'), cor, min: sum('min'), warn: sum('warn'),
-    ok: jb.filter((x) => x.n && x.ok !== false && (x.min >= 60 || (x.goal > 0 && x.sol >= x.goal))).length,
+    ok: jb.filter((x) => x.n && x.ok !== false && (x.min >= (x.must || 60) || (x.goal > 0 && x.sol >= x.goal))).length,
     came: jb.filter((x) => x.n > 0).length,
     acc: sol ? Math.round(cor / sol * 100) : 0,
   };
@@ -112,11 +113,16 @@ export function autoEval(jb, score) {
    reps/sums: 이번 주와 지난주의 daily_reports · session_summaries
    wr: 이번 주 weekly_reports (없으면 null) · prevWr: 지난주 weekly_reports
    scores: 이번 주 이전에 보낸 형성평가 점수 (최근 순) */
-export function assembleWeek({ student, schedule, reps, sums, wr, prevWr, scores, ws, teacher, rankText }) {
+export function assembleWeek({ student, schedule, reps, sums, wr, prevWr, scores, ws, teacher, rankText, plans = [] }) {
   if (wr?.sent_at && wr.report_snapshot?.jb) {
     const frozen = JSON.parse(JSON.stringify(wr.report_snapshot));
     frozen.sent = wr.sent_at; frozen.rk = rankText || '';
     return frozen;
+  }
+  const frozenPlans = plans.filter(p => p.week_start === ws || p.week_start === addDays(ws, -7));
+  if (frozenPlans.some(p => p.week_start === ws)) {
+    schedule = frozenPlans.map(p => ({ ...p, kind: 'jiok', weekday: ((parseDay(p.day).getDay()+6)%7)+1, end_min: 1440 }));
+    student = { ...student, stage: frozenPlans.find(p => p.week_start === ws).stage || student.stage };
   }
   const jb = weekRows(ws, schedule, reps, sums).map((x) => ({ ...x, goal: x.goal || (x.n ? 0 : student.stage * 25) }));
   const prevRows = weekRows(addDays(ws, -7), schedule, reps, sums);
@@ -129,7 +135,7 @@ export function assembleWeek({ student, schedule, reps, sums, wr, prevWr, scores
   const weekNo = start ? Math.floor((parseDay(ws) - parseDay(weekStartOf(parseDay(start)))) / 6048e5) + 1 : null;
   const classes = (schedule ?? []).filter((x) => x.kind === 'class').length;
   const thisW = wkSum(jb);
-  const pending = (schedule ?? []).some(sc => sc.kind === 'jiok' && new Date(addDays(ws, sc.weekday - 1) + 'T00:00:00+09:00').getTime() + (sc.end_min ?? 1440) * 60000 > Date.now());
+  const pending = (schedule ?? []).some(sc => sc.kind === 'jiok' && (!sc.day || sc.week_start === ws) && (sc.ends_at ? new Date(sc.ends_at).getTime() : new Date(addDays(ws, sc.weekday - 1) + 'T00:00:00+09:00').getTime() + (sc.end_min ?? 1440) * 60000) > Date.now());
   return {
     pending,
     id: student.id, n: student.name, gr: student.grade || '', st: student.stage,
@@ -200,7 +206,7 @@ export function weeklyCard(s, o = {}) {
   const w = wkSum(s.jb), has = s.score !== '' && s.score != null, sc = +s.score, U = ups(s), B = bar3(s), BB = badgeBlock(s, o);
   const P = s.prev ?? { min: 0, sol: 0, acc: 0 };
   const lv = (v) => `<span class="lvb l${v}">${LV[v]}</span>`;
-  const jbOk = (x) => (!x.n ? '<span class="lvb l0">빠짐</span>' : (x.ok !== false && (x.min >= 60 || (x.goal > 0 && x.sol >= x.goal))) ? '<span class="lvb l3">오공완</span>' : '<span class="lvb l1">아쉬운 날</span>');
+  const jbOk = (x) => (!x.n ? '<span class="lvb l0">빠짐</span>' : (x.ok !== false && (x.min >= (x.must || 60) || (x.goal > 0 && x.sol >= x.goal))) ? '<span class="lvb l3">오공완</span>' : '<span class="lvb l1">아쉬운 날</span>');
   const tr = [['2주 전', s.test.prev2], ['지난주', s.test.prev], ['이번 주', sc]].filter(([, v]) => v != null);
   const testBlock = has ? `
     <div class="wsec"><div class="wt">금요일 형성평가 <small>${esc(s.test.range)}</small></div>

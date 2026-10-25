@@ -1094,7 +1094,7 @@ async function scrSurvey(kid, id) {
   if (row.version === 2) {
     if (viewAtStart !== viewVersion) return;
     mount(`${head('학습 체크인')}<div id="checkinRoot"></div>`);
-    const leave=()=>{delete state.kid[kid.id];go({v:'home',kid:kid.id});};
+    const leave=()=>{delete state.kid[kid.id];go(state.mode==='student'?{v:'home',kid:kid.id}:{v:'student',kid:kid.id});};
     mountCheckin($('#checkinRoot'),row,{
       leave,
       save:async ({action,answers,revision})=>{
@@ -1181,9 +1181,9 @@ async function openAlerts(kid) {
       row.append(el('span', 'when', hhmm(n.created_at)));
       const g = el('div', 'grow'); g.append(el('b', null, n.title), el('p', null, n.body)); row.append(g);
       const p = n.payload ?? {};
-      if (p.session_id || p.week_start || p.survey_id) {
+      if (p.session_id || p.week_start || p.survey_id || p.checkin_case) {
         row.style.cursor = 'pointer';
-        row.onclick = () => (p.view === 'survey' ? go({ v: 'survey', kid: kid.id, id: p.survey_id })
+        row.onclick = () => (p.checkin_case ? openTarget(p) : p.view === 'survey' ? go({ v: 'survey', kid: kid.id, id: p.survey_id })
           : p.view === 'weekly' ? go({ v: 'weekly', kid: kid.id, w: p.week_start }) : go({ v: 'detail', kid: kid.id, s: p.session_id }));
       }
       box.append(row);

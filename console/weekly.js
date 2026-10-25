@@ -119,7 +119,8 @@ export function assembleWeek({ student, schedule, reps, sums, wr, prevWr, scores
     return frozen;
   }
   const jb = weekRows(ws, schedule, reps, sums).map((x) => ({ ...x, goal: x.goal || (x.n ? 0 : student.stage * 25) }));
-  const pj = weekRows(addDays(ws, -7), schedule, reps, sums).filter((x) => x.n);
+  const prevRows = weekRows(addDays(ws, -7), schedule, reps, sums);
+  const pj = prevRows.filter((x) => x.n);
   const pw = pj.length ? wkSum(pj) : null;
   const test = normalizeTest(wr?.test_total ?? 20, wr?.test_correct, wr?.test_score);
   const score = test.score;
@@ -128,8 +129,9 @@ export function assembleWeek({ student, schedule, reps, sums, wr, prevWr, scores
   const weekNo = start ? Math.floor((parseDay(ws) - parseDay(weekStartOf(parseDay(start)))) / 6048e5) + 1 : null;
   const classes = (schedule ?? []).filter((x) => x.kind === 'class').length;
   const thisW = wkSum(jb);
+  const pending = (schedule ?? []).some(sc => sc.kind === 'jiok' && new Date(addDays(ws, sc.weekday - 1) + 'T00:00:00+09:00').getTime() + (sc.end_min ?? 1440) * 60000 > Date.now());
   return {
-    pending: (schedule ?? []).some(sc => sc.kind === 'jiok' && new Date(addDays(ws, sc.weekday - 1) + 'T00:00:00+09:00').getTime() + (sc.end_min ?? 1440) * 60000 > Date.now()),
+    pending,
     id: student.id, n: student.name, gr: student.grade || '', st: student.stage,
     cls: classes ? `1:1 수업 주 ${classes}회` : '',
     ws, label: weekLabel(ws), range: weekRange(ws), weekNo,
@@ -139,7 +141,7 @@ export function assembleWeek({ student, schedule, reps, sums, wr, prevWr, scores
     score: score == null ? '' : String(score),
     learn: wr?.learn ?? [], nextL: wr?.next_learn ?? [],
     next: wr?.next_stage ?? student.stage,
-    up: !!pw && pj.length && pw.ok === pj.length && jb.length && thisW.ok === jb.length && thisW.acc >= 80,
+    up: !pending && !!pw && prevRows.length > 0 && pw.ok === prevRows.length && jb.length > 0 && thisW.ok === jb.length && thisW.acc >= 80,
     good: wr?.good_key || '끝까지 완주', more: wr?.more_key || '오답 다시 풀기', point: wr?.point_key || '개념 다지는 중',
     ev, rk: rankText || '', teacher: teacher || '', sent: wr?.sent_at || null, gold: !!wr?.gold,
   };

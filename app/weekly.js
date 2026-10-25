@@ -1,7 +1,7 @@
-import { normalizeTest } from './rules.js';
+import { normalizeTest } from './rules.js?v=ranking4';
 // 주간 리포트 — 앱(학생 · 보호자) · 콘솔(미리보기 · 이미지 저장)이 같은 카드를 씁니다.
 // build_site.py 가 app/ 과 teacher-web/ 에 복사합니다. 고칠 때는 shared/ 만 고치세요.
-import { pib } from './look.js';
+import { pib } from './look.js?v=ranking4';
 
 export const LV = { 3: '좋음', 2: '보통', 1: '노력 필요' };
 export const EVAL = [

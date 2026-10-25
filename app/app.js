@@ -1,4 +1,4 @@
-import { notificationChanged, studyDayScore } from './rules.js?v=ranking3';
+import { notificationChanged, studyDayScore } from './rules.js?v=ranking4';
 // 수학지옥pt 학생·보호자 앱 (개편판)
 //
 // 로그인 · 알림 · 화면 이동 · 자녀 추가는 운영 앱과 같은 코드입니다.
@@ -31,10 +31,10 @@ try {
   throw e;
 }
 
-import { CHARS, ITEMS, EFFECTS, isOpen, progress, pib } from './look.js?v=ranking3';
-import * as WK from './weekly.js?v=ranking3';
-import { SV, SV_COLS } from './survey.js?v=ranking3';
-import { checkinPrompt, mountCheckin } from './checkin.js?v=ranking3';
+import { CHARS, ITEMS, EFFECTS, isOpen, progress, pib } from './look.js?v=ranking4';
+import * as WK from './weekly.js?v=ranking4';
+import { SV, SV_COLS } from './survey.js?v=ranking4';
+import { checkinPrompt, mountCheckin } from './checkin.js?v=ranking4';
 
 /* ---- 자동 로그인 (운영 앱과 같음) ---- */
 const AUTO_KEY = 'jp.autoLogin';

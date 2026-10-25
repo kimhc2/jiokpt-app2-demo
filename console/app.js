@@ -1,4 +1,4 @@
-import { normalizeTest, studyDayScore } from './rules.js?v=ranking3';
+import { normalizeTest, studyDayScore } from './rules.js?v=ranking4';
 // import 를 정적으로 쓰면 CDN 을 못 받았을 때 모듈 전체가 실행되지 않아
 // 설정 안내조차 뜨지 않고 죽은 화면만 남습니다. 그래서 검사를 먼저 하고
 // 라이브러리는 동적으로 불러옵니다.
@@ -39,9 +39,9 @@ try {
 const sb = createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY, { auth: { storageKey: 'jp-console-auth' } });
 
 // 앱 개편 — 주간 리포트 카드 · 캐릭터 · 설문 문항은 학생 앱과 같은 파일 (shared/)
-import * as WK from './weekly.js?v=ranking3';
-import { SV, SV_COLS } from './survey.js?v=ranking3';
-import { CHECKIN_FORMS, CHECKIN_COLUMNS, CHECKIN_STATUS, mountCheckin, answerText, visibleItems } from './checkin.js?v=ranking3';
+import * as WK from './weekly.js?v=ranking4';
+import { SV, SV_COLS } from './survey.js?v=ranking4';
+import { CHECKIN_FORMS, CHECKIN_COLUMNS, CHECKIN_STATUS, mountCheckin, answerText, visibleItems } from './checkin.js?v=ranking4';
 
 // 이벤트 종류 정의. positive 는 학부모 리포트에서 따로 집계됩니다.
 // 수업 중 찍는 버튼. 칭찬은 리포트에서 따로 다루기로 해서 빼두었습니다.

@@ -1,4 +1,4 @@
-import { notificationChanged } from './rules.js';
+import { notificationChanged, studyDayScore } from './rules.js';
 // 수학지옥pt 학생·보호자 앱 (개편판)
 //
 // 로그인 · 알림 · 화면 이동 · 자녀 추가는 운영 앱과 같은 코드입니다.
@@ -589,7 +589,7 @@ async function loadKid(kid, force = false) {
   for (const r of [reps, sums, sched, weekly, sv, stats, hist, ci]) if (r.error) throw r.error;
   const out = {
     at: Date.now(), ws,
-    reps: reps.data ?? [], sums: sums.data ?? [], sched: sched.data ?? [], weekly: weekly.data ?? [],
+    reps: (reps.data ?? []).map(r => ({...r, participation_ok: r.day_ok ?? r.participation_ok})), sums: sums.data ?? [], sched: sched.data ?? [], weekly: weekly.data ?? [],
     surveys: [...(ci.data?.items ?? []), ...(sv.data ?? []).filter((x) => x.target === (state.mode === 'student' ? 'student' : 'parent') && (!x.deferred_until || new Date(x.deferred_until) <= new Date()))],
     adjustments: ci.data?.adjustments ?? [],
     stats: stats.data ?? {}, hist: hist.data ?? [],
@@ -603,26 +603,37 @@ async function loadLeague() {
   state.league = data;
   return data;
 }
-const myRow = (L) => L?.members?.find((m) => m.me);
-const myRank = (L) => (L?.members?.findIndex((m) => m.me) ?? -1) + 1;
+const myRow = (L) => L?.members?.find((m) => m.me) ?? (L?.personal ? { ...L.personal, me: true } : null);
+const myRank = (L) => L?.members?.find((m) => m.me)?.rank ?? 0;
+
+const effortTitle = n => n >= 14 ? '꾸준한 도전자' : n >= 7 ? '스스로 도전가' : n >= 3 ? '추가 노력가' : n >= 1 ? '한 걸음 더' : '나의 첫 도전';
+function effortCard(stats = {}) {
+  const n = stats.extra_days || 0, next = n < 3 ? 3 : n < 7 ? 7 : n < 14 ? 14 : null;
+  const reward = n < 3 ? '도전 별빛 효과' : n < 7 ? '혜성 머리핀' : '꾸준한 도전자 칭호';
+  return `<div class="card"><div class="row" style="justify-content:space-between"><b>🌟 추가 노력 별 ${n}개</b><span class="pill p-sun">${effortTitle(n)}</span></div><p class="muted small" style="margin-top:8px">문제 목표보다 25% 더 풀거나, 확인한 학습시간을 15분 더 채우면 하루 별 1개. 추가 공부는 선택이에요.</p>${next ? `<div class="bar" style="margin-top:10px"><i data-w="${Math.min(100,n*100/next)}%"></i></div><p class="muted small" style="margin-top:5px">별 ${next}개까지 ${next-n}개 · ${reward}</p>` : '<p class="muted small" style="margin-top:8px">함께 쌓은 도전이 멋져요. 추가 학습도 누적 기록에 계속 남아요.</p>'}</div>`;
+}
 
 // 오늘 · 이번 주 지옥방 상태
 function todayInfo(kid, c) {
   const tk = todayKey();
   const todayReps = c.reps.filter((r) => WK.kstDayKey(r.started_at) === tk);
   const dow = ((new Date(WK.parseDay(tk)).getDay() + 6) % 7) + 1;   // 1 월 ~ 7 일
-  const jiokToday = c.sched.find((s) => s.kind === 'jiok' && s.weekday === dow);
+  const frozen = c.stats.week_plans?.filter(p => p.week_start === c.ws) || [];
+  const plannedToday = frozen.find(p => p.day === tk);
+  const jiokToday = frozen.length ? (plannedToday ? {start_min: null} : null) : c.sched.find(s => s.kind === 'jiok' && s.weekday === dow);
   const rep = todayReps[todayReps.length - 1] ?? null;
-  return { rep, jiokToday, dow, goal: kid.stage * 25 };
+  const progress = c.stats.week_progress?.days?.find(d => d.day === tk);
+  return { rep, jiokToday, dow, progress, stage: frozen[0]?.stage || kid.stage, goal: progress?.goal ?? kid.stage * 25, minutesGoal: progress?.minutes_goal ?? kid.mandatory_minutes ?? 60 };
 }
 function weekChips(kid, c) {
   const tk = todayKey();
   return ['월', '화', '수', '목', '금'].map((d, i) => {
     const k = WK.addDays(c.ws, i);
     const reps = c.reps.filter((r) => WK.kstDayKey(r.started_at) === k);
-    const jiok = c.sched.some((s) => s.kind === 'jiok' && s.weekday === i + 1);
+    const frozen = c.stats.week_plans?.filter(p => p.week_start === c.ws) || [];
+    const jiok = frozen.length ? frozen.some(p => p.day === k) : c.sched.some(s => s.kind === 'jiok' && s.weekday === i + 1);
     const cls = c.sched.some((s) => s.kind === 'class' && s.weekday === i + 1);
-    if (reps.length) { const ok = reps.some((r) => r.participation_ok); return `<div class="day ${ok ? 'ok' : 'miss'}">${d}<i>${ok ? '🔥' : '아쉬움'}</i></div>`; }
+    if (reps.length) { const progress = c.stats.week_progress?.days?.find(d => d.day === k); const ok = progress?.ok ?? reps.some(r => r.participation_ok); return `<div class="day ${ok ? 'ok' : progress?.due === false ? 'today' : 'miss'}">${d}<i>${ok ? '🔥' : progress?.due === false ? '진행 중' : '노력'}</i></div>`; }
     if (k === tk) return `<div class="day today">${d}<i>${jiok ? '오늘' : i === 4 ? '형성평가' : cls ? '수업' : '오늘'}</i></div>`;
     if (jiok && k < tk) return `<div class="day miss">${d}<i>–</i></div>`;
     if (i === 4) return `<div class="day test">${d}<i>형성평가</i></div>`;
@@ -653,8 +664,8 @@ async function scrHome() {
   const [c, L] = await Promise.all([loadKid(kid), loadLeague().catch(() => null)]);
   const T = todayInfo(kid, c), r = T.rep;
   const d = new Date();
-  const say = r ? (r.participation_ok ? (r.pt_over ? `오늘 오공완! 순공도 ${r.stay_minutes - r.mandatory_minutes}분 더 했어 🔥` : '오늘 오공완! 이대로만 가자 🔥') : '리포트 왔어! 다음엔 할당량까지 끝내 보자')
-    : T.jiokToday ? `오늘 할당량 ${T.goal}문제, 같이 끝내 보자!` : T.dow === 5 ? '오늘은 형성평가 날! 역전 찬스야' : '오늘은 지옥방 없는 날. 푹 쉬고 다음에 달리자';
+  const say = r ? (r.participation_ok ? (r.pt_over ? `오늘 오공완! 순공도 ${r.stay_minutes - r.mandatory_minutes}분 더 했어 🔥` : '오늘 오공완! 이대로만 가자 🔥') : '오늘 해낸 공부가 쌓였어. 다음 목표도 한 걸음씩!')
+    : T.jiokToday ? `오늘 할당량 ${T.goal}문제, 같이 끝내 보자!` : T.dow === 5 ? '오늘은 이번 주 배운 걸 확인해 보자' : '오늘은 지옥방 없는 날. 푹 쉬고 다음에 달리자';
   const me = myRow(L);
   if (viewAtStart !== viewVersion) return;
   const v = mount(`
@@ -664,22 +675,24 @@ async function scrHome() {
       <div class="row" style="align-items:flex-end">${pib(kid.look, 112, r?.participation_ok ? 'm-cheer m-settle' : 'm-idle')}
         <div style="flex:1;padding-bottom:16px"><div class="say">${say}</div></div></div>
       <div class="card" style="margin:12px 0 0;box-shadow:none">
-        <div class="row" style="justify-content:space-between;margin-bottom:10px"><b style="font-weight:900">오늘 지옥방</b><span class="pill p-sun">STAGE ${kid.stage} · 지옥방 1회 ${T.goal}문제</span></div>
-        <div class="kv"><span>오늘 할당량</span><b>${r ? r.solved : 0}<span class="muted" style="font-size:13px;font-weight:700"> / ${r ? r.assigned : T.goal}문제</span></b></div>
-        <div class="bar" style="margin-bottom:12px"><i data-w="${r ? Math.min(100, r.completion) : 0}%"></i></div>
-        <div class="kv"><span>순공시간</span><b>${r ? hm(r.stay_minutes) : '0분'}<span class="muted" style="font-size:13px;font-weight:700"> / 1시간</span></b></div>
-        <div class="bar"><i class="mint" data-w="${r ? Math.min(100, Math.round(r.stay_minutes / r.mandatory_minutes * 100)) : 0}%"></i></div>
-        ${r ? '' : `<p class="muted small" style="margin-top:10px">${T.jiokToday ? `오늘 ${pad(Math.floor(T.jiokToday.start_min / 60))}:${pad(T.jiokToday.start_min % 60)} 지옥방 · ` : ''}리포트가 오면 점수와 순위가 바로 바뀌어요.</p>`}
+        <div class="row" style="justify-content:space-between;margin-bottom:10px"><b style="font-weight:900">오늘 지옥방</b><span class="pill p-sun">STAGE ${T.stage} · 오늘 목표 ${T.goal}문제</span></div>
+        <div class="kv"><span>오늘 할당량</span><b>${T.progress?.solved ?? r?.solved ?? 0}<span class="muted" style="font-size:13px;font-weight:700"> / ${T.goal}문제</span></b></div>
+        <div class="bar" style="margin-bottom:12px"><i data-w="${Math.min(100, (T.progress?.solved ?? r?.solved ?? 0) * 100 / T.goal)}%"></i></div>
+        <div class="kv"><span>순공시간</span><b>${hm(T.progress?.minutes ?? r?.stay_minutes ?? 0)}<span class="muted" style="font-size:13px;font-weight:700"> / ${hm(T.minutesGoal)}</span></b></div>
+        <div class="bar"><i class="mint" data-w="${Math.min(100, (T.progress?.minutes ?? r?.stay_minutes ?? 0) * 100 / T.minutesGoal)}%"></i></div>
+        ${r ? '' : `<p class="muted small" style="margin-top:10px">${T.jiokToday ? '오늘 예정된 학습 · ' : ''}확인된 학습 기록은 하루씩 합산돼요. 조금씩 해낸 공부도 쌓여요.</p>`}
       </div>
     </div>
     ${pendingCard(kid, c)}
+    ${effortCard(c.stats)}
     <div class="grid2">
-      <button class="mini press" data-go="rank"><small>이번 주 ${esc(L?.tier_name ?? '불씨')} 리그</small><b>${me ? myRank(L) + '위' : '–'}</b> <span class="muted small">/ 10명</span></button>
-      <div class="mini"><small>이번 주 점수</small><b>${me?.points ?? 0}점</b></div>
+      <button class="mini press" data-go="rank"><small>꾸준함 등급 · ${esc(L?.tier_name ?? '불씨')}</small><b>${L?.eligible ? (myRank(L) ? myRank(L) + '위' : '–') : '준비주'}</b> <span class="muted small">${L?.eligible ? '/ ' + L.members.length + '명' : '다음 주부터 함께'}</span></button>
+      <div class="mini"><small>이번 주 랭킹 점수</small><b>${fp(L?.personal?.points)}점</b></div>
     </div>
+    ${rankingBreakdown(L?.personal)}
     <div class="card"><b style="font-weight:900">이번 주</b>
       <div class="week">${weekChips(kid, c)}</div>
-      <p class="muted small" style="margin-top:10px">금요일 형성평가 점수가 랭킹에 크게 들어가요. <b style="color:var(--sky)">역전 찬스!</b></p></div>`, { tab: 'home' });
+      <p class="muted small" style="margin-top:10px">기본 목표를 채우면 100점, 초과 공부와 형성평가는 순위에 가산돼요. <b style="color:var(--sky)">시험 성적과 순위에 관계없이 꾸준함 등급이 올라가요.</b></p></div>`, { tab: 'home' });
   $$('[data-go]', v).forEach((b) => { b.onclick = () => go({ v: b.dataset.go }); });
   bindSurveyCards(kid);
   await renderNotifyCard($('#ncHost'));
@@ -705,42 +718,38 @@ function rankPills(_before, after, color = 'fire') {
 }
 function celebrateReport(kid, L, r, onShown = () => {}) {
   const after = myRank(L), before = null;
-  banner(r.participation_ok ? '오공완 리포트가 도착했어요' : '오늘 리포트가 도착했어요', `문제 ${r.solved}/${r.assigned} · 순공 ${hm(r.stay_minutes)} · +${r.points}점 바로 반영!`);
+  banner(r.participation_ok ? '오공완 리포트가 도착했어요' : '오늘 리포트가 도착했어요', `문제 ${r.solved}/${r.assigned} · 확인한 학습시간 ${hm(r.stay_minutes)}`);
   scheduleCelebration(() => {
     cele(`
       <div style="font-size:13px;font-weight:900;color:var(--fire);letter-spacing:1px">${r.participation_ok ? '오늘 공부 완료!' : '오늘 리포트 도착!'}</div>
-      <div class="big" style="margin:6px 0 4px;font-size:34px">+<span id="cu">0</span>점</div>
+      <div class="big" style="margin:6px 0 4px;font-size:34px"><span id="cu">0</span>점</div><p class="muted small">이번 주 랭킹 총점 · 오늘의 노력도 쌓였어요</p>
       <div style="margin:4px 0 10px">${pib(kid.look, 120, 'm-cheer m-settle')}</div>
       <div class="card" style="width:100%;margin-bottom:10px">${pointRows(r)}</div>
       ${rankPills(before, after)}
       <button class="btn press" id="seeRank">랭킹에서 보기</button>
       <button class="btn ghost press" id="closeC" style="margin-top:8px">닫기</button>`);
-    countUp($('#cu'), r.points);
-    $('#seeRank').onclick = () => { closeCele(); go({ v: 'rank', anim: true, gain: r.points }); };
+    $('#cu').textContent = fp(L?.personal?.points);
+    $('#seeRank').onclick = () => { closeCele(); go({ v: 'rank' }); };
     $('#closeC').onclick = closeCele;
   }, onShown);
 }
 function pointRows(r) {
-  const rows = [
-    [r.task_ok ? `오늘 할당량 ${r.assigned}문제 완료` : `할당량 ${r.solved}/${r.assigned}문제`, r.pt_task, true],
-    [r.stay_ok ? '순공 1시간 채움' : `순공 ${hm(r.stay_minutes)}`, r.pt_stay, true],
-  ];
-  if (r.pt_over) rows.push([`순공 ${r.stay_minutes - r.mandatory_minutes}분 더 <small class="muted">(30분마다 +1)</small>`, r.pt_over, false]);
-  return rows.map(([t, p, base]) => `<div class="rc ${base ? 'base' : ''}"><span>${t}</span><span class="plus">+${p}</span></div>`).join('');
+  const goal = r.daily_goal_problems || r.assigned || 1, minutes = r.mandatory_minutes || 60;
+  return `<div class="rc"><span>이번 기록의 풀이량</span><b>${r.solved}문제</b></div><div class="rc"><span>확인한 학습시간</span><b>${hm(r.stay_minutes)}</b></div><p class="muted small">하루 기록을 합산해 문제 목표 60%·학습시간 40%로 계산해요. 목표를 넘긴 문제와 시간은 추가 점수로 반영해요. 주간 내역에서 실제 합산 점수를 확인할 수 있어요.</p>`;
 }
 async function celebrateWeekly(kid, c, L, w, daily = null, onShown = () => {}) {
   const prev = c.weekly.find((x) => x.week_start < w.week_start && x.test_score != null)?.test_score ?? null;
   const s = w.test_score, ts = s == null ? 0 : Math.round(s / 4), g = s != null && prev != null && s > prev ? 5 : 0;
-  const gain = (w.week_start === c.ws ? ts + g : 0) + (daily?.points ?? 0);
+  const gain = w.week_start === c.ws ? Number(L?.personal?.test_points||0)+Number(L?.personal?.growth_points||0) : 0;
   banner(w.gold ? '🏅 이번 주 기준 통과!' : '주간 리포트가 왔어요', s != null ? `형성평가 ${s}점${g ? ` · 지난번보다 +${s - prev}점` : ''}` : '이번 주 리포트가 왔어요');
   scheduleCelebration(() => {
     cele(`
-      <div style="font-size:13px;font-weight:900;color:var(--sky);letter-spacing:1px">${s != null ? '금요일 역전 찬스!' : '주간 리포트 도착'}</div>
+      <div style="font-size:13px;font-weight:900;color:var(--sky);letter-spacing:1px">${s != null ? '이번 주 배운 만큼 성장했어요' : '주간 리포트 도착'}</div>
       ${s != null ? `<div class="big" style="margin:6px 0">${s}점</div>${prev != null ? `<div class="muted small" style="margin-bottom:10px">지난번 ${prev}점 → 이번 ${s}점 (${s - prev >= 0 ? '+' : ''}${s - prev})</div>` : ''}` : ''}
       ${pib(kid.look, 120, 'm-cheer m-settle')}
-      ${s != null ? `<div class="card" style="width:100%;margin:10px 0"><div class="rc"><span>형성평가 ${s}점 ÷ 4</span><span class="plus" style="color:var(--sky)">+${ts}</span></div><div class="rc"><span>성장 보너스 ${g ? '(지난번보다 오름)' : ''}</span><span class="plus" style="color:var(--sky)">+${g}</span></div></div>` : ''}
+      ${w.week_start === c.ws ? rankingBreakdown(L?.personal) : '<p class="muted small">시험 점수는 해당 주의 랭킹 내역에서 확인할 수 있어요.</p>'}
       ${w.gold ? '<div class="pill p-sun" style="font-size:13px;margin-bottom:10px">🏅 다음 주 한 주 동안 황금 오라!</div>' : ''}
-      ${daily ? `<div class="card" style="width:100%;margin:8px 0"><b>오늘 지옥방 +${daily.points}점</b>${pointRows(daily)}</div>` : ''}
+      ${daily ? `<div class="card" style="width:100%;margin:8px 0"><b>오늘 공부도 함께 확인해요</b>${pointRows(daily)}</div>` : ''}
       ${gain ? rankPills(null, myRank(L), 'sky') : ''}
       <button class="btn press" id="seeW" style="background:var(--sky);box-shadow:none">주간 리포트 보기</button>
       ${gain ? '<button class="btn ghost press" id="seeR" style="margin-top:8px">랭킹 보기</button>' : ''}<button class="btn ghost press" id="closeW" style="margin-top:8px">닫기</button>`);
@@ -766,7 +775,7 @@ async function scrParentHome() {
       return `<button class="kid press" data-kid="${k.id}"><span class="av">${pib(k.look, 48)}</span>
         <span class="main"><b>${esc(k.name)}</b><small>${esc(k.grade || '')} · STAGE ${k.stage}</small>
           <p>${last ? `최근 지옥방 ${dayLabel(last.started_at)}` : '아직 리포트가 없어요'} · 🔥 연속 오공완 ${c?.stats.streak ?? 0}번</p></span>
-        <span class="side">${last ? `<span class="pill ${last.participation_ok ? 'p-mint' : 'p-gray'}">${last.participation_ok ? '오공완' : '아쉬운 날'}</span>` : ''}${unread ? `<span class="badge">새 알림 ${unread}</span>` : ''}${c?.surveys.length ? '<span class="pill p-grape">설문</span>' : ''}</span></button>`;
+        <span class="side">${last ? `<span class="pill ${last.participation_ok ? 'p-mint' : 'p-gray'}">${last.participation_ok ? '오공완' : '노력 기록'}</span>` : ''}${unread ? `<span class="badge">새 알림 ${unread}</span>` : ''}${c?.surveys.length ? '<span class="pill p-grape">설문</span>' : ''}</span></button>`;
     }).join('')}
     <button class="btn ghost press" id="addChild">＋ 자녀 추가</button>`);
   $$('[data-kid]', v).forEach((b) => { b.onclick = () => go({ v: 'student', kid: b.dataset.kid }); });
@@ -792,7 +801,7 @@ async function scrKid(kid) {
       <div class="week">${weekChips(kid, c)}</div></div>
     ${pendingCard(kid, c)}
     ${last ? `<button class="card press navBtn" id="lastRep" style="display:block;text-align:left">
-        <div class="row" style="justify-content:space-between"><b style="font-weight:900">${dayLabel(last.started_at) === '오늘' ? '오늘 리포트' : '최근 리포트'} · ${dayLabel(last.started_at)}</b><span class="pill ${last.participation_ok ? 'p-mint' : 'p-gray'}">${last.participation_ok ? '오공완' : '아쉬운 날'}</span></div>
+        <div class="row" style="justify-content:space-between"><b style="font-weight:900">${dayLabel(last.started_at) === '오늘' ? '오늘 리포트' : '최근 리포트'} · ${dayLabel(last.started_at)}</b><span class="pill ${last.participation_ok ? 'p-mint' : 'p-gray'}">${last.participation_ok ? '오공완' : '노력 기록'}</span></div>
         <div class="muted small" style="margin-top:6px;font-weight:700">문제 ${last.solved}/${last.assigned} · 정답률 ${last.accuracy}% · 순공 ${hm(last.stay_minutes)}</div></button>` : '<div class="card empty">아직 지옥방 리포트가 없어요</div>'}
     ${lastW ? `<button class="card press navBtn" id="lastW" style="display:block;text-align:left"><div class="row" style="justify-content:space-between"><b style="font-weight:900">주간 리포트 · ${WK.weekLabel(lastW.week_start)}</b><span class="pill p-sky">${lastW.test_score != null ? `형성평가 ${lastW.test_score}점` : '이번 주 학습 포인트'}</span></div><div class="muted small" style="margin-top:6px;font-weight:700">눌러서 한 주 기록 보기${lastW.gold ? ' · 🏅 기준 통과' : ''}</div></button>` : ''}
     <div class="navList">
@@ -885,59 +894,43 @@ function drawCands() {
 }
 
 /* ------------------------------------------------------------------ */
-/* 랭킹 — 같은 스테이지 10명                                             */
+/* 랭킹 — 같은 스테이지의 주간 고정 그룹                                             */
 /* ------------------------------------------------------------------ */
-async function scrRank(r = {}) {
-  const viewAtStart = viewVersion;
-  const kid = state.own;
-  const [L, c] = await Promise.all([loadLeague(), loadKid(kid)]);
-  if (!L?.members?.length) return mount(`${head('랭킹', { back: false })}<div class="card empty">아직 리그가 준비되지 않았어요. 잠시 후 다시 확인해 주세요.</div>`, { tab: 'rank' });
-  const M = L.members, me = myRow(L), rk = myRank(L);
-  const testSent = c.weekly.some((w) => w.week_start === c.ws);
-  const gap = M[0].points - (me?.points ?? 0);
-  if (viewAtStart !== viewVersion) return;
-  const v = mount(`
-    ${head(`${esc(L.tier_name)} 리그`, { back: false, right: '<button class="pill p-gray press" id="rules">점수 규칙 ⓘ</button>' })}
-    <div class="card" style="background:${testSent ? 'var(--mintbg)' : 'var(--skybg)'};box-shadow:none;padding:13px 15px">
-      ${testSent
-        ? (rk <= 3 ? `<b style="font-weight:900;color:#118a72">지금 ${rk}위! 이대로면 일요일 밤 ${esc(L.next_tier_name)} 리그로 올라가요</b>` : `<b style="font-weight:900;color:#118a72">형성평가까지 반영됐어요. 일요일 밤에 정산해요</b>`)
-        : `<b style="font-weight:900;color:#2563c9">금요일 형성평가 = 역전 찬스</b><div class="small" style="margin-top:3px;color:#3b5f99">100점이면 최대 +30점(성장 보너스 포함).${rk > 1 ? ` 지금 1위와 ${gap}점 차이!` : ' 지금 1위, 지켜 내자!'}</div>`}
-    </div>
-    <div class="muted small" style="margin:2px 2px 8px">STAGE ${L.stage} 친구들끼리 · 리포트가 오면 바로 바뀌어요 · 일요일 밤 정산 · 강등 없음</div>
-    <div id="lb">${M.map((x, i) => lrow(x, i, L.stage)).join('')}</div>`, { tab: 'rank' });
-  $('#rules').onclick = rulesSheet;
-  if (r.anim) {
-    const meRow = $('#lb .lrow.me');
-    if (meRow) {
-      meRow.classList.add('rank-gain');
-      meRow.insertAdjacentHTML('beforeend', `<span class="gain">+${r.gain ?? ''}</span>`);
-    }
-    state.route = { v: 'rank' }; history.replaceState(state.route, '');
-  }
-  void v;
+const fp = value => Number(value || 0).toLocaleString('ko-KR', {maximumFractionDigits:2});
+function rankingBreakdown(p, title='이번 주 랭킹 점수') {
+ if(!p)return '';
+ if(p.policy_applied===false)return `<div class="card"><b>이전 기준으로 보관한 점수 · ${fp(p.points)}점</b><p class="muted small">새 가산 규칙을 과거 기록에 다시 적용하지 않았어요.</p></div>`;
+ return `<div class="card ranking-breakdown"><b>${title} · ${fp(p.points)}점</b><div class="rc"><span>기본 학습</span><b>${fp(p.base_points)}점</b></div><div class="rc"><span>목표 초과 학습</span><b>+${fp(p.extra_points)}점</b></div><div class="rc"><span>형성평가${p.test_score==null?' · 미발송/미입력':''}</span><b>+${fp(p.test_points)}점</b></div><div class="rc"><span>성장·90점 이상 유지 보너스</span><b>+${fp(p.growth_points)}점</b></div><p class="muted small">기본 목표 달성은 ${fp(p.base_points)}/100점이에요. 완주 보상과 꾸준함 등급은 기본 목표로 판단해요.</p></div>`;
 }
-function lrow(x, i, stage) {
-  const zone = i === 3 ? '<div class="zone">여기까지 승급 ↑</div>' : '';
-  const gold = x.look?.fx === 'gold';
-  return `${zone}<div class="lrow ${x.me ? 'me' : ''} ${i < 3 ? 'top' : ''}"><span class="rk">${i + 1}</span><span class="av ${gold ? 'gav' : ''}">${pib(x.look, 32)}</span><span class="nm">${esc(x.nick)}${x.me ? ' <span style="color:var(--fire)">(나)</span>' : ''}<small>STAGE ${x.stage ?? stage}${gold ? ' · <b style="color:#C98A00">🏅 황금 오라</b>' : ''}</small></span><span class="pt">${x.points}</span></div>`;
+async function scrRank(r = {}) {
+ const viewAtStart=viewVersion;
+ const [L]=await Promise.all([loadLeague(),loadKid(state.own)]);
+ if(viewAtStart!==viewVersion)return;
+ if(!L)return mount(`${head('랭킹',{back:false})}<div class="card empty">주간 목표를 준비하고 있어요.</div>`,{tab:'rank'});
+ const p=L.personal||{},M=L.members||[];
+ const v=mount(`${head('학습 리그',{back:false,right:'<button class="pill p-gray press" id="rules">점수 규칙 ⓘ</button>'})}
+ <div class="card" style="background:var(--mintbg)"><b>${!L.eligible?'이번 주는 준비주 또는 목표 대기 중이에요. 다음 주 목표를 선생님과 확인해 주세요.':p.complete?'이번 주 기본 목표를 모두 채웠어요! 초과 공부와 시험 점수도 순위에 더해져요.':`기본 목표 ${p.completed||0}/${p.total||0}일 완료 · 남은 공부도 이어 가 보자!`}</b><p class="small">꾸준함 등급 ${esc(L.tier_name)} · 기본 목표를 모두 완주하면 마감 후 등급 상승${L.tier>=5?' · 현재 최고 등급':''}</p></div>
+ ${rankingBreakdown(p)}
+ <p class="muted small">STAGE ${L.stage} · 실제 학생 ${M.length}명 · 동점은 공동 순위 · 월요일에 지난주 정산</p>
+ <div id="lb">${M.length?M.map(x=>lrow(x,0,L.stage)).join(''):'<div class="card empty">아직 비교할 주간 목표가 준비되지 않았어요. 공부 기록과 누적 보상은 계속 남아요.</div>'}</div>
+ <p class="muted small">주중 순위는 진행 중이에요. 같은 날의 기록은 합산하고, 예정일 밖에서 한 추가 공부도 가산해요. 형성평가 점수는 리포트를 발송하면 반영돼요.</p>`,{tab:'rank'});
+ $('#rules',v).onclick=rulesSheet;
+}
+function lrow(x,_i,stage) {
+ const gold=x.look?.fx==='gold';
+ return `<div class="lrow ${x.me?'me':''} ${x.rank===1?'top':''}"><span class="rk">${x.ties>1?'공동 ':''}${x.rank}</span><span class="av ${gold?'gav':''}">${pib(x.look,32)}</span><span class="nm">${esc(x.nick)}${x.me?' <span style="color:var(--fire)">(나)</span>':''}<small>STAGE ${x.stage??stage}${x.me?` · 기본 ${fp(x.breakdown?.base_points)} + 초과 ${fp(x.breakdown?.extra_points)} + 시험·보너스 ${fp(Number(x.breakdown?.test_points||0)+Number(x.breakdown?.growth_points||0))}`:''}</small></span><span class="pt">${fp(x.points)}점</span></div>`;
 }
 function rulesSheet() {
-  sheet(`<b style="font-size:18px;font-weight:900">점수는 이렇게 쌓여요</b>
-    <p class="muted small" style="margin:4px 0 12px">할당량은 선생님과 정한 스테이지라서, 같은 스테이지 친구들끼리 겨뤄요.</p>
-    <div class="card" style="background:var(--s1);box-shadow:none">
-      <b class="small" style="color:var(--mint);font-weight:900">기본 — 오공완 (지옥방 1번)</b>
-      <div class="rc base"><span>오늘 할당량 다 풀기</span><span class="plus">+6</span></div>
-      <div class="rc base"><span>순공 1시간 채우기</span><span class="plus">+4</span></div></div>
-    <div class="card" style="background:var(--s1);box-shadow:none">
-      <b class="small" style="color:var(--fire);font-weight:900">더 하면 — 추가 점수</b>
-      <div class="rc"><span>순공 1시간 넘긴 30분마다 <small class="muted">(최대 +4)</small></span><span class="plus">+1</span></div></div>
-    <div class="card" style="background:var(--skybg);box-shadow:none">
-      <b class="small" style="color:var(--sky);font-weight:900">금요일 — 역전 찬스</b>
-      <div class="rc"><span>형성평가 점수 ÷ 4 <small class="muted">(100점 = 25점)</small></span><span class="plus" style="color:var(--sky)">+25</span></div>
-      <div class="rc"><span>지난번보다 오르면 성장 보너스</span><span class="plus" style="color:var(--sky)">+5</span></div></div>
-    <p class="muted small">리포트가 오는 순간 바로 반영되고, 일요일 밤에 정산해서 상위 3명이 다음 리그로 올라가요.</p>
-    <button class="btn press" style="margin-top:12px" id="okRules">알겠어요</button>`);
-  $('#okRules').onclick = closeSheet;
+ const p=state.league?.policy||{},problem=p.problem_weight??60,time=p.time_weight??40,div=p.test_divisor??4,bonus=p.bonus??5,high=p.high_score??90;
+ sheet(`<b style="font-size:18px;font-weight:900">랭킹과 보상 규칙</b><div class="card" style="margin-top:12px;box-shadow:none">
+ <p>예정된 학습일마다 문제 목표 ${problem}% + 확인한 학습시간 ${time}%를 계산해요. 기본 점수는 예정일 평균으로 최대 100점이에요.</p>
+ <p>목표를 넘긴 문제와 시간은 같은 비중으로 추가 점수를 받아요. 추가 점수에는 상한이 없어요. 예정일 밖의 공부는 그날의 목표 대비 학습량을 추가 점수로 넣고, 주간 예정일 수로 나눠요.</p>
+ <p>발송된 형성평가 점수 ÷ ${div} = 최대 ${100/div}점. 직전 발송 시험보다 오르거나, 직전과 이번 시험 모두 ${high}점 이상이면 +${bonus}점이에요. 둘 다 해당해도 한 번만, 첫 시험은 이 보너스가 없어요.</p></div>
+ <p class="small">예정일마다 문제와 시간을 모두 채우면 기본 100점. 모두 두 배 공부하면 학습 200점이 돼요. 이 점수에 형성평가와 보너스를 더해 순위를 매겨요. 점수는 소수 둘째 자리까지 표시하고 동점은 공동 순위예요.</p>
+ <p class="small">완주·연속 기록은 기본 목표로 판단해요. 결석을 시험·추가 점수로 메우지 않아요. 마감한 주에 기본 80점을 달성하면 포도 파이뿔·메달, 마감한 주의 기본 목표를 100점 완주하면 왕관·꾸준함 등급 상승을 받아요. 순위와는 별개예요.</p>
+ <p class="small">문제를 목표보다 25% 더 풀거나, 확인한 학습시간을 15분 더 채우면 하루 별 하나. 별 3개는 도전 별빛, 7개는 혜성 머리핀이에요. 누적 보상은 이미 얻은 것을 유지해요. 딸기는 오공완 3일, 하트는 7일이에요.</p>
+ <button class="btn press" id="okRules">알겠어요</button>`);
+ $('#okRules').onclick=closeSheet;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1010,7 +1003,7 @@ async function scrRec() {
   const v = mount(`
     ${head('기록', { back: false })}
     ${lastW ? `<button class="card press navBtn" id="lastW" style="display:block;text-align:left"><div class="row" style="justify-content:space-between"><b style="font-weight:900">📊 주간 리포트 · ${WK.weekLabel(lastW.week_start)}</b><span class="pill p-sky">${lastW.test_score != null ? `형성평가 ${lastW.test_score}점` : '학습 포인트'}</span></div><div class="muted small" style="margin-top:6px;font-weight:700">${lastW.gold ? '🏅 기준 통과 · ' : ''}눌러서 한 주 기록 보기</div></button>` : '<div class="card"><b style="font-weight:900">📊 주간 리포트</b><p class="muted small" style="margin-top:4px">금요일 형성평가가 끝나면 여기에 와요</p></div>'}
-    ${last ? `<button class="card press navBtn" id="lastRep" style="display:block;text-align:left"><div class="row" style="justify-content:space-between"><b style="font-weight:900">🔥 최근 지옥방 · ${dayLabel(last.started_at)}</b><span class="pill ${last.participation_ok ? 'p-mint' : 'p-gray'}">${last.participation_ok ? '오공완' : '아쉬운 날'}</span></div><div class="muted small" style="margin-top:6px;font-weight:700">문제 ${last.solved}/${last.assigned} · 정답률 ${last.accuracy}% · 순공 ${hm(last.stay_minutes)} · +${last.points}점</div></button>` : ''}
+    ${last ? `<button class="card press navBtn" id="lastRep" style="display:block;text-align:left"><div class="row" style="justify-content:space-between"><b style="font-weight:900">🔥 최근 지옥방 · ${dayLabel(last.started_at)}</b><span class="pill ${last.participation_ok ? 'p-mint' : 'p-gray'}">${last.participation_ok ? '오공완' : '노력 기록'}</span></div><div class="muted small" style="margin-top:6px;font-weight:700">문제 ${last.solved}/${last.assigned} · 정답률 ${last.accuracy}% · 순공 ${hm(last.stay_minutes)}</div></button>` : ''}
     <div class="navList">
       <button class="navBtn press" data-nav="growth"><span>공부 달력 · 누적 기록</span><span class="chev">›</span></button>
       <button class="navBtn press" data-nav="weeklies"><span>주간 리포트 모아보기</span><span class="chev">›</span></button>
@@ -1034,7 +1027,7 @@ async function scrMe() {
   const v = mount(`
     ${head('나', { back: false })}
     <div class="meTop">${pib(kid.look, 130, 'm-idle')}<div class="nick">${esc(kid.nickname || '이름을 정해 주세요')}</div>
-      <div class="muted small">${esc(kid.name)} · ${esc(kid.grade || '')} · STAGE ${kid.stage}</div></div>
+      <div class="muted small">${esc(kid.name)} · ${esc(kid.grade || '')} · STAGE ${kid.stage}</div><span class="pill p-sun" style="margin-top:8px">🌟 ${effortTitle(c.stats.extra_days || 0)}</span></div>
     <div id="ncHost" style="margin-top:12px"></div>
     ${c.surveys.map(s=>s.version===2?checkinPrompt(s):legacyPrompt(s)).join('')}
     <div class="navList">
@@ -1069,6 +1062,7 @@ function menuSheet() {
 /* 데일리 리포트 · 수업 상세                                             */
 /* ------------------------------------------------------------------ */
 function reportCard(r, sum, { student = false } = {}) {
+  r = { ...r, participation_ok: r.day_ok ?? r.participation_ok };
   const d = new Date(r.started_at);
   const tier = Math.max(1, Math.min(4, Number(r.stage) || 1));
   const tag = (ok, warn, t) => `<span class="tag ${ok ? 'ok' : warn ? 'warn' : 'bad'}">${t}</span>`;
@@ -1084,14 +1078,14 @@ function reportCard(r, sum, { student = false } = {}) {
     <div class="repBody">
       ${metric('오늘 할당량', r.solved, ` / ${r.assigned}문제`, r.completion, `${tag(r.completion >= 100, r.completion >= 85, r.completion >= 100 ? '완료' : '조금 남음')} ${r.completion >= 100 ? `할당량의 ${r.completion}%` : `${r.assigned - r.solved}문제 남음`}`)}
       ${metric('정답률', `${r.accuracy}%`, ` / 목표 ${r.target_accuracy}%`, r.accuracy, `${tag(r.accuracy >= r.target_accuracy, r.accuracy >= r.target_accuracy - 10, r.accuracy >= r.target_accuracy ? '달성' : '조금 아쉬움')}`, 'mint')}
-      ${metric('순공시간', hm(r.stay_minutes), ' / 1시간', r.stay_minutes * 100 / r.mandatory_minutes, `${tag(r.stay_ok, false, r.stay_ok ? '채움' : '조금 모자람')} ${r.stay_ok ? (r.stay_minutes > r.mandatory_minutes ? `${r.stay_minutes - r.mandatory_minutes}분 더 했어요` : '1시간 채웠어요') : `${r.mandatory_minutes - r.stay_minutes}분 모자라요`}`, 'mint')}
-      ${metric('학습량 순위', `상위 ${pc}%`, '', 100 - pc, '같은 학년 기준')}
+      ${metric('순공시간', hm(r.stay_minutes), ' / '+hm(r.mandatory_minutes), r.stay_minutes * 100 / r.mandatory_minutes, `${tag(r.stay_ok, false, r.stay_ok ? '채움' : '조금 모자람')} ${r.stay_ok ? (r.stay_minutes > r.mandatory_minutes ? `${r.stay_minutes - r.mandatory_minutes}분 더 했어요` : '목표 시간을 채웠어요') : `${r.mandatory_minutes - r.stay_minutes}분 모자라요`}`, 'mint')}
+      
       <div class="warnBox">${neg ? `수업 중 경고 <b>${neg}회</b> · ${parts.join(' · ')}` : '졸음 · 딴짓 · 자리 이탈 없이 끝까지 했어요'}</div>
       <div class="split"><div><span>누적 문제</span><b>${r.cumulative_problems.toLocaleString('ko-KR')}<small>+${r.solved}</small></b></div><div><span>1만 문제까지</span><b>${r.to_ten_thousand.toLocaleString('ko-KR')}</b></div></div>
       ${r.memo ? `<div class="memoBox">선생님 메모 · ${esc(r.memo)}</div>` : ''}
-      ${student ? `<div class="ptsBox"><b style="font-weight:900;font-size:13px">랭킹 점수 +${r.points}</b>${pointRows(r)}</div>` : ''}
+      ${student ? `<div class="ptsBox"><b style="font-weight:900;font-size:13px">오늘의 학습 기록</b>${pointRows(r)}</div>` : ''}
       <div class="verdict ${r.participation_ok ? 'ok' : 'bad'}"><span class="vMark">${r.participation_ok ? '🔥' : '💪'}</span>
-        <div><strong>${r.participation_ok ? '오공완' : '아쉬운 날'}</strong><span>${[r.stay_ok ? '순공 1시간 채움' : '순공 1시간 미만', r.task_ok ? '할당량 완료' : `할당량 ${r.completion}%`].join(' · ')}</span></div></div>
+        <div><strong>${r.participation_ok ? '오공완' : '노력 기록'}</strong><span>${[r.stay_ok ? '순공 1시간 채움' : '순공 1시간 미만', r.task_ok ? '할당량 완료' : `할당량 ${r.completion}%`].join(' · ')}</span></div></div>
     </div></div>`;
 }
 
@@ -1122,21 +1116,24 @@ function weekObj(kid, c, ws) {
   let rankText = '';
   if (state.mode === 'student') {
     const h = c.hist.find((x) => x.week_start === ws);
-    if (h) rankText = `${h.rank}위${h.promoted ? ' · 다음 리그로 승급!' : ''}`;
-    else if (ws === c.ws && state.league) rankText = `지금 ${myRank(state.league)}위 · 일요일 밤 정산`;
+    if (h) rankText = `${h.rank}위${h.promoted ? ' · 꾸준함 등급 상승!' : ''}`;
+    else if (ws === c.ws && state.league) rankText = `지금 ${myRank(state.league)}위 · 주중 임시 순위`;
   }
-  return WK.assembleWeek({ student: kid, schedule: c.sched, reps: c.reps, sums: c.sums, wr, prevWr, scores, ws, teacher: wr?.teacher_name, rankText });
+  return WK.assembleWeek({ student: kid, schedule: c.sched, reps: c.reps, sums: c.sums, wr, prevWr, scores, ws, teacher: wr?.teacher_name, rankText, plans: c.stats.week_plans });
 }
 async function scrWeekly(kid, ws) {
   const viewAtStart = viewVersion;
   const c = await loadKid(kid);
   if (state.mode === 'student' && !state.league) await loadLeague().catch(() => null);
+  const rankingResult = state.mode === 'student' ? await sb.rpc('ranking_summary',{p_student:kid.id,p_week:ws}) : {data:null};
+  if(rankingResult.error)throw rankingResult.error;
   const s = weekObj(kid, c, ws);
   const B = WK.bar3(s);
   const goldNow = state.mode === 'student' && s.gold && ws === WK.addDays(c.ws, -7);
   if (viewAtStart !== viewVersion) return;
   mount(`${head('주간 리포트', { right: `<span class="pill p-sky">${s.label}</span>` })}
     ${WK.weeklyCard(s, { rank: state.mode === 'student', ch: kid.look?.ch })}
+    ${rankingBreakdown(rankingResult.data,'이 주의 랭킹 점수')}
     ${goldNow && B.all ? '<button class="btn press" id="useGold" style="margin-top:10px;background:linear-gradient(90deg,#F5B700,#FF8A3D)">🏅 황금 오라 바로 쓰기</button>' : ''}
     <p class="muted small" style="text-align:center;margin-top:10px">${state.mode === 'student' ? '' : '보호자 화면에는 랭킹이 보이지 않아요'}</p>`);
   const g = $('#useGold');
@@ -1298,11 +1295,12 @@ async function openAlerts(kid) {
 /* 공부 달력 · 누적 기록 (운영 앱과 같은 계산, 오공완 = 순공 1시간 또는 할당량 완료) */
 /* ------------------------------------------------------------------ */
 async function openGrowth(kid, ym) {
-  const [{ data: reps, error }, { data: sums }] = await Promise.all([
+  const [{ data: reps, error }, { data: sums }, attendance] = await Promise.all([
     sb.from('daily_reports').select('session_id, started_at, solved, stay_minutes, participation_ok')
       .eq('student_id', kid.id).order('started_at', { ascending: true }).limit(2000),
     sb.from('session_summaries').select('session_id, started_at').eq('student_id', kid.id).eq('status', 'ended')
       .order('started_at', { ascending: false }).limit(500),
+    sb.rpc('student_attendance_days', {p_student: kid.id}),
   ]);
   if (state.route?.v !== 'growth') return;
   if (error) return fail(error);
@@ -1316,6 +1314,8 @@ async function openGrowth(kid, ym) {
     d.solved += r.solved; d.stay += r.stay_minutes; d.ok = d.ok || r.participation_ok; d.sid = r.session_id;
     days.set(k, d);
   }
+  if (attendance.error) return fail(attendance.error);
+  for (const a of attendance.data ?? []) { const d = days.get(a.day); if (d) d.ok = a.ok; }
   for (const s of sums ?? []) { const k = dayKey(s.started_at); if (!days.has(k)) days.set(k, { solved: 0, stay: 0, ok: false, reported: false, sid: s.session_id }); }
 
   const nowYm = ymOf(Date.now());
@@ -1328,7 +1328,7 @@ async function openGrowth(kid, ym) {
   const title = el('h3');
   hd.append(prev, title, next);
   const sumLine = el('p', 'calSum'), grid = el('div', 'calGrid'), legend = el('div', 'calLegend');
-  for (const [c, t] of [['ok', '오공완'], ['bad', '아쉬운 날'], ['none', '리포트 없음']]) { const s = el('span'); s.append(el('i', c), document.createTextNode(t)); legend.append(s); }
+  for (const [c, t] of [['ok', '오공완'], ['bad', '노력 기록'], ['none', '리포트 없음']]) { const s = el('span'); s.append(el('i', c), document.createTextNode(t)); legend.append(s); }
   legend.append(el('span', 'calHint', '칸 숫자 = 그날 푼 문제'));
   cal.append(hd, sumLine, grid, legend);
   body.append(cal);
@@ -1422,15 +1422,15 @@ const histOrder = () => (store.get('jp.histOrder') === 'asc' ? 'asc' : 'desc');
 async function openHistory(kid, order = histOrder()) {
   const [{ data }, { data: reps }] = await Promise.all([
     sb.from('session_summaries').select('*').eq('student_id', kid.id).eq('status', 'ended').order('started_at', { ascending: false }).limit(200),
-    sb.from('daily_reports').select('session_id, participation_ok, solved, assigned, stay_minutes').eq('student_id', kid.id).limit(500),
+    sb.from('daily_reports').select('session_id, participation_ok, day_ok, solved, assigned, stay_minutes').eq('student_id', kid.id).limit(500),
   ]);
   if (state.route?.v !== 'history') return;
-  const repBy = Object.fromEntries((reps ?? []).map((r) => [r.session_id, r]));
+  const repBy = Object.fromEntries((reps ?? []).map((r) => [r.session_id, {...r, participation_ok: r.day_ok ?? r.participation_ok}]));
   const v = mount(`${head('지난 지옥방 전체')}<div class="card"><div class="listHead"><h3>지옥방 ${data?.length ?? 0}회</h3><div class="sortSeg"><button class="sortBtn" data-o="desc">최신순</button><button class="sortBtn" data-o="asc">오래된순</button></div></div><div class="list" id="hList"></div></div>`);
   const draw = (ord) => {
     $$('.sortBtn', v).forEach((b) => b.classList.toggle('on', b.dataset.o === ord));
     const rows = ord === 'asc' ? [...(data ?? [])].reverse() : (data ?? []);
-    $('#hList', v).innerHTML = rows.map((s) => { const r = repBy[s.session_id]; return `<div class="row" data-s="${s.session_id}" style="cursor:pointer"><span class="when">${dayLabel(s.started_at)}</span><div class="grow"><b>${r ? (r.participation_ok ? '🔥 오공완' : '아쉬운 날') : '리포트 없이 끝남'}</b><p>${r ? `문제 ${r.solved}/${r.assigned} · 순공 ${hm(r.stay_minutes)}` : ''}${s.negative_count ? `${r ? ' · ' : ''}경고 ${s.negative_count}회` : ''}</p></div><span class="chev">›</span></div>`; }).join('') || '<p class="empty">아직 기록이 없어요</p>';
+    $('#hList', v).innerHTML = rows.map((s) => { const r = repBy[s.session_id]; return `<div class="row" data-s="${s.session_id}" style="cursor:pointer"><span class="when">${dayLabel(s.started_at)}</span><div class="grow"><b>${r ? (r.participation_ok ? '🔥 오공완' : '노력 기록') : '리포트 없이 끝남'}</b><p>${r ? `문제 ${r.solved}/${r.assigned} · 순공 ${hm(r.stay_minutes)}` : ''}${s.negative_count ? `${r ? ' · ' : ''}경고 ${s.negative_count}회` : ''}</p></div><span class="chev">›</span></div>`; }).join('') || '<p class="empty">아직 기록이 없어요</p>';
     $$('[data-s]', v).forEach((row) => { row.onclick = () => go({ v: 'detail', kid: kid.id, s: row.dataset.s }); });
   };
   $$('.sortBtn', v).forEach((b) => { b.onclick = () => { store.set('jp.histOrder', b.dataset.o); state.route = { ...state.route, order: b.dataset.o }; history.replaceState(state.route, ''); draw(b.dataset.o); }; });

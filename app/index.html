@@ -19,9 +19,10 @@
 <body class="jp2">
 
 <main id="app">
+<p id="bootStatus" role="status">공부 기록을 불러오는 중이에요…</p>
 
   <!-- 로그인 -->
-  <section id="view-auth" class="view">
+  <section id="view-auth" class="view" hidden>
     <div class="authHero">
       <img class="wordmark" src="icons/icon-192.png" alt="">
       <h1>수학지옥<span>PT</span></h1>
@@ -119,8 +120,8 @@
 
 <div class="banner" id="banner"><div class="ic">수학<br>지옥</div><div><b id="bannerT"></b><p id="bannerB"></p></div></div>
 <div class="dim" id="dim"></div>
-<div class="sheet" id="sheet"></div>
-<div class="cele" id="cele"></div>
+<div class="sheet" id="sheet" role="dialog" aria-label="메뉴" aria-modal="true" aria-hidden="true" inert></div>
+<div class="cele" id="cele" role="dialog" aria-label="공부 기록 알림" aria-modal="true" aria-hidden="true" inert></div>
 <div id="toast" class="toast"></div>
 <canvas id="fx"></canvas>
 

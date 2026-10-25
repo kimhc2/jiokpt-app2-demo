@@ -104,3 +104,5 @@ color:var(--text);font-family:"Noto Sans KR","Pretendard","Malgun Gothic",sans-s
 .wr.img .wtiles b{font-size:21px}.wr.img .wtab{font-size:13px}.wr.img .wes{font-size:13px}.wr.img .wek{font-size:13.5px}.wr.img .wev{grid-template-columns:92px 74px 1fr}
 .wr.img .wupk{font-size:15px}.wr.img .wupr b{font-size:21px}.wr.img .wupt{font-size:16px}.wr.img .whl{font-size:15px}
 .wr.img .wbt{font-size:16px}.wr.img .wbr{font-size:14px}.wr.img .wbg b{font-size:15px}
+
+@media (prefers-reduced-motion:reduce){.jp2 *, .jp2 *:before, .jp2 *:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}

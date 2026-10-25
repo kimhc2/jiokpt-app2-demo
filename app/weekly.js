@@ -1,3 +1,4 @@
+import { normalizeTest } from './rules.js';
 // 주간 리포트 — 앱(학생 · 보호자) · 콘솔(미리보기 · 이미지 저장)이 같은 카드를 씁니다.
 // build_site.py 가 app/ 과 teacher-web/ 에 복사합니다. 고칠 때는 shared/ 만 고치세요.
 import { pib } from './look.js';
@@ -69,14 +70,14 @@ function weekRows(ws, schedule, reps, sums) {
   for (const sc of schedule ?? []) {
     if (sc.kind !== 'jiok') continue;
     const k = addDays(ws, sc.weekday - 1);
-    if (k <= today) days.set(k, { d: dLabel(k), key: k, goal: 0, sol: 0, cor: 0, min: 0, warn: 0, n: 0 });
+    if (k < today || (k === today && Date.now() >= new Date(k + 'T00:00:00+09:00').getTime() + (sc.end_min ?? 1440) * 60000)) days.set(k, { d: dLabel(k), key: k, goal: 0, sol: 0, cor: 0, min: 0, warn: 0, n: 0 });
   }
   for (const r of reps ?? []) {
     const k = kstDayKey(r.started_at);
     if (k < ws || k > addDays(ws, 6)) continue;
     const x = days.get(k) ?? { d: dLabel(k), key: k, goal: 0, sol: 0, cor: 0, min: 0, warn: 0, n: 0 };
     x.goal += r.assigned; x.sol += r.solved; x.cor += r.correct; x.min += r.stay_minutes;
-    x.warn += warnBy[r.session_id] ?? 0; x.n++; x.ok = (x.ok || r.participation_ok);
+    x.warn += warnBy[r.session_id] ?? 0; x.n++; x.ok = (x.ok !== false && r.participation_ok);
     days.set(k, x);
   }
   // 빠진 날의 할당량은 그 학생 스테이지로
@@ -88,7 +89,7 @@ export function wkSum(jb) {
   const sol = sum('sol'), cor = sum('cor');
   return {
     sol, goal: sum('goal'), cor, min: sum('min'), warn: sum('warn'),
-    ok: jb.filter((x) => x.n && (x.min >= 60 || (x.goal > 0 && x.sol >= x.goal))).length,
+    ok: jb.filter((x) => x.n && x.ok !== false && (x.min >= 60 || (x.goal > 0 && x.sol >= x.goal))).length,
     came: jb.filter((x) => x.n > 0).length,
     acc: sol ? Math.round(cor / sol * 100) : 0,
   };
@@ -112,22 +113,29 @@ export function autoEval(jb, score) {
    wr: 이번 주 weekly_reports (없으면 null) · prevWr: 지난주 weekly_reports
    scores: 이번 주 이전에 보낸 형성평가 점수 (최근 순) */
 export function assembleWeek({ student, schedule, reps, sums, wr, prevWr, scores, ws, teacher, rankText }) {
+  if (wr?.sent_at && wr.report_snapshot?.jb) {
+    const frozen = JSON.parse(JSON.stringify(wr.report_snapshot));
+    frozen.sent = wr.sent_at; frozen.rk = rankText || '';
+    return frozen;
+  }
   const jb = weekRows(ws, schedule, reps, sums).map((x) => ({ ...x, goal: x.goal || (x.n ? 0 : student.stage * 25) }));
   const pj = weekRows(addDays(ws, -7), schedule, reps, sums).filter((x) => x.n);
   const pw = pj.length ? wkSum(pj) : null;
-  const score = wr?.test_score ?? null;
+  const test = normalizeTest(wr?.test_total ?? 20, wr?.test_correct, wr?.test_score);
+  const score = test.score;
   const ev = wr?.ev && Object.keys(wr.ev).length ? { ...autoEval(jb, score), ...wr.ev } : autoEval(jb, score);
   const start = student.start_date;
   const weekNo = start ? Math.floor((parseDay(ws) - parseDay(weekStartOf(parseDay(start)))) / 6048e5) + 1 : null;
   const classes = (schedule ?? []).filter((x) => x.kind === 'class').length;
   const thisW = wkSum(jb);
   return {
+    pending: (schedule ?? []).some(sc => sc.kind === 'jiok' && new Date(addDays(ws, sc.weekday - 1) + 'T00:00:00+09:00').getTime() + (sc.end_min ?? 1440) * 60000 > Date.now()),
     id: student.id, n: student.name, gr: student.grade || '', st: student.stage,
     cls: classes ? `1:1 수업 주 ${classes}회` : '',
     ws, label: weekLabel(ws), range: weekRange(ws), weekNo,
     jb,
     prev: pw ? { min: pw.min, sol: pw.sol, acc: pw.acc, ok: pw.ok, warn: pw.warn, ev: prevWr?.sent_at ? prevWr.ev : null } : null,
-    test: { score, total: wr?.test_total ?? 20, correct: wr?.test_correct ?? null, prev: scores?.[0] ?? null, prev2: scores?.[1] ?? null, range: wr?.test_range || '' },
+    test: { score, total: test.total, correct: test.correct, prev: scores?.[0] ?? null, prev2: scores?.[1] ?? null, range: wr?.test_range || '' },
     score: score == null ? '' : String(score),
     learn: wr?.learn ?? [], nextL: wr?.next_learn ?? [],
     next: wr?.next_stage ?? student.stage,
@@ -163,8 +171,8 @@ export function bar3(s) {
   const w = wkSum(s.jb), n = s.jb.length;
   const mins = n ? Math.min(...s.jb.map((x) => x.sol)) : 0;
   const items = [
-    { t: '지옥방 모두 오공완', ok: w.ok === n && n > 0, v: `${w.ok}/${n}번` },
-    { t: '순공 1시간씩 채우기', ok: n > 0 && s.jb.every((x) => x.min >= 60), v: hm(w.min) || '0분' },
+    { t: '지옥방 모두 오공완', ok: !s.pending && w.ok === n && n > 0, v: `${w.ok}/${n}번` },
+    { t: '순공 1시간씩 채우기', ok: !s.pending && n > 0 && s.jb.every((x) => x.min >= 60), v: hm(w.min) || '0분' },
     { t: '정답률 80% 이상', ok: w.sol > 0 && w.acc >= 80, v: w.sol ? w.acc + '%' : '기록 없음' },
     s.st === 1   // STAGE 1(지옥방 1회 25문제)은 하루 50문제 대신 할당량을 다 풀면 통과
       ? { t: '하루 할당량 다 풀기', ok: n > 0 && s.jb.every((x) => x.goal > 0 && x.sol >= x.goal), v: `하루 최소 ${mins}/${s.st * 25}문제` }
@@ -190,7 +198,7 @@ export function weeklyCard(s, o = {}) {
   const w = wkSum(s.jb), has = s.score !== '' && s.score != null, sc = +s.score, U = ups(s), B = bar3(s), BB = badgeBlock(s, o);
   const P = s.prev ?? { min: 0, sol: 0, acc: 0 };
   const lv = (v) => `<span class="lvb l${v}">${LV[v]}</span>`;
-  const jbOk = (x) => (!x.n ? '<span class="lvb l0">빠짐</span>' : (x.min >= 60 || (x.goal > 0 && x.sol >= x.goal)) ? '<span class="lvb l3">오공완</span>' : '<span class="lvb l1">아쉬운 날</span>');
+  const jbOk = (x) => (!x.n ? '<span class="lvb l0">빠짐</span>' : (x.ok !== false && (x.min >= 60 || (x.goal > 0 && x.sol >= x.goal))) ? '<span class="lvb l3">오공완</span>' : '<span class="lvb l1">아쉬운 날</span>');
   const tr = [['2주 전', s.test.prev2], ['지난주', s.test.prev], ['이번 주', sc]].filter(([, v]) => v != null);
   const testBlock = has ? `
     <div class="wsec"><div class="wt">금요일 형성평가 <small>${esc(s.test.range)}</small></div>
@@ -207,7 +215,7 @@ export function weeklyCard(s, o = {}) {
       <div class="wmeta">${s.label} · ${s.range}${s.weekNo ? `<span class="wweek">${[1, 2, 3, 4].map((i) => `<i class="${i <= s.weekNo ? 'on' : ''}"></i>`).join('')} ${s.weekNo <= 4 ? `4주 중 ${s.weekNo}주차` : `${s.weekNo}주차`}</span>` : ''}</div>
       ${U.length ? `<div class="whl">지난주보다 좋아졌어요 · ${U.slice(0, 2).map((u) => `${u.t} <b>${u.v}</b>`).join(' · ')}${U.length > 2 ? ` 외 ${U.length - 2}가지` : ''}${B.all ? ' · 🏅 기준 통과' : ''}</div>` : B.all ? '<div class="whl">이번 주도 탄탄하게 해냈어요! 지금처럼만 하면 충분해요</div>' : ''}</div>
     ${U.length ? `<div class="wup"><div class="wupt">🎉 지난주보다 좋아진 점 <span>${U.length}가지</span></div>
-      ${U.slice(0, 5).map((u) => `<div class="wupr"><span class="wupi">${u.ic}</span><span class="wupk">${u.t}<small>${u.d}</small></span><b>${u.v}</b></div>`).join('')}</div>` : ''}
+      ${U.map((u) => `<div class="wupr"><span class="wupi">${u.ic}</span><span class="wupk">${u.t}<small>${u.d}</small></span><b>${u.v}</b></div>`).join('')}</div>` : ''}
     ${BB}
     <div class="wtiles">
       <div><small>출석</small><b>지옥방 ${w.came}/${s.jb.length}</b><em>${esc(s.cls)}</em></div>

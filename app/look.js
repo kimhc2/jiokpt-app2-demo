@@ -8,11 +8,11 @@ export const CHARS = [
   { id: 'pi_sky',   name: '하늘 파이뿔', cond: '첫 오공완',        need: ['ok', 1] },
   { id: 'pi_mint',  name: '민트 파이뿔', cond: '오공완 5번',       need: ['ok', 5] },
   { id: 'pi_grape', name: '포도 파이뿔', cond: '랭킹 TOP3 들기',   need: ['top3', 1] },
-  { id: 'pi_pink',  name: '딸기 파이뿔', cond: '친구 응원 받기',   need: ['cheer', 1] },
+  { id: 'pi_pink',  name: '딸기 파이뿔', cond: '오공완 3번',       need: ['ok', 3] },
   { id: 'root',     name: '루트뿔',     cond: '형성평가 80점',    need: ['best_test', 80] },
   { id: 'inf',      name: '무한뿔',     cond: '연속 오공완 14번', need: ['streak_best', 14] },
   { id: 'sigma',    name: '시그마뿔',   cond: '누적 1,000문제',   need: ['solved', 1000] },
-  { id: 'div',      name: '나누기뿔',   cond: '4주 완주',         need: ['weeks', 4] },
+  { id: 'div',      name: '나누기뿔',   cond: '4주 연속 완주',         need: ['weeks', 4] },
 ];
 
 // 소품 15개 — 칸은 '소품' 하나라 한 번에 하나만 씁니다 (10/23 결정)
@@ -26,7 +26,7 @@ export const ITEMS = [
   { id: 'glasses',    name: '동글 안경',    part: '얼굴', cond: '순공 10시간',        need: ['stay', 600] },
   { id: 'sunglasses', name: '선글라스',     part: '얼굴', cond: '누적 300문제',       need: ['solved', 300] },
   { id: 'headphone',  name: '헤드폰',      part: '머리', cond: '오공완 10번',        need: ['ok', 10] },
-  { id: 'scarf',      name: '목도리',      part: '목·몸', cond: '2주 완주',          need: ['weeks', 2] },
+  { id: 'scarf',      name: '목도리',      part: '목·몸', cond: '2주 연속 완주',          need: ['weeks', 2] },
   { id: 'bowtie',     name: '나비넥타이',   part: '목·몸', cond: '형성평가 70점',     need: ['best_test', 70] },
   { id: 'cap',        name: '학사모',      part: '머리', cond: '형성평가 +10점 성장', need: ['test_growth', 10] },
   { id: 'medal',      name: '메달',        part: '목·몸', cond: '랭킹 TOP3 들기',    need: ['top3', 1] },
@@ -41,7 +41,7 @@ export const EFFECTS = [
   { id: 'spark',  name: '반짝반짝',   cond: '처음부터' },
   { id: 'orbit',  name: '수학 궤도',  cond: '누적 500문제',     need: ['solved', 500] },
   { id: 'aura',   name: '불꽃 오라',  cond: '연속 오공완 7번',  need: ['streak_best', 7] },
-  { id: 'hearts', name: '하트 퐁퐁',  cond: '친구 응원 받기',   need: ['cheer', 1] },
+  { id: 'hearts', name: '하트 퐁퐁',  cond: '오공완 7번',       need: ['ok', 7] },
   { id: 'ring',   name: '무지개 링',  cond: '리그 승급',        need: ['promoted', 1] },
 ];
 

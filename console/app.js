@@ -2304,10 +2304,23 @@ function drawGallery() {
   $('#zipAll').onclick = saveWeeklyZip;
   $$('.one', g).forEach((b) => b.onclick = () => saveWeeklyOne(wkS.list[b.dataset.i]));
 }
+function confirmWeeklySend(count) {
+  return new Promise((resolve) => {
+    const dialog = document.createElement('dialog');
+    dialog.setAttribute('aria-labelledby', 'weeklySendTitle');
+    dialog.style.cssText = 'border:1px solid #ddd;border-radius:18px;padding:24px;max-width:420px;width:calc(100% - 32px);margin:auto;box-shadow:0 12px 40px #0003';
+    dialog.innerHTML = `<h3 id="weeklySendTitle">${count}명에게 주간 리포트 보내기</h3><p style="margin:12px 0 20px;line-height:1.6">학생·보호자 앱에 공개되고 형성평가 점수가 랭킹에 반영됩니다.</p><div style="display:flex;gap:10px;justify-content:flex-end"><button class="ghost" data-cancel>취소</button><button class="primary" data-confirm>${count}명에게 보내기</button></div>`;
+    const finish = (yes) => { dialog.close(); dialog.remove(); resolve(yes); };
+    dialog.querySelector('[data-cancel]').onclick = () => finish(false);
+    dialog.querySelector('[data-confirm]').onclick = () => finish(true);
+    dialog.addEventListener('cancel', (e) => { e.preventDefault(); finish(false); });
+    document.body.append(dialog); dialog.showModal(); dialog.querySelector('[data-cancel]').focus();
+  });
+}
 async function sendWeekly() {
   const unsent = wkS.list.filter((s) => !wkS.wr[s.id]?.sent_at);
   if (!unsent.length) return;
-  if (!confirm(`${unsent.length}명에게 주간 리포트를 보낼까요?\n학생 · 보호자 앱에 도착하고, 형성평가 점수가 랭킹에 바로 들어갑니다.`)) return;
+  if (!(await confirmWeeklySend(unsent.length))) return;
   const btn = $('#sendApp'); btn.disabled = true; btn.textContent = '보내는 중…';
   try {
     const { error: publishError } = await sb.rpc('publish_weekly_drafts', { p_week: wkS.ws, p_students: unsent.map(s => s.id) });

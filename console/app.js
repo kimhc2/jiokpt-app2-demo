@@ -1,3 +1,4 @@
+import { normalizeTest } from './rules.js';
 // import 를 정적으로 쓰면 CDN 을 못 받았을 때 모듈 전체가 실행되지 않아
 // 설정 안내조차 뜨지 않고 죽은 화면만 남습니다. 그래서 검사를 먼저 하고
 // 라이브러리는 동적으로 불러옵니다.
@@ -148,7 +149,7 @@ $('#loginForm').addEventListener('submit', async ev => {
 $('#logout').onclick = () => sb.auth.signOut();
 
 sb.auth.onAuthStateChange((_evt, session) => {
-  if (session) boot().catch(fail);
+  if (session) { if (state.me?.id === session.user.id) return; boot().catch(fail); }
   else { state.me = null; show('login'); }
 });
 
@@ -270,6 +271,7 @@ $$('#sentScope button').forEach((b) => b.onclick = () => {
 
 // 주간 리포트 · 설문 화면의 범위 버튼도 같은 설정을 씁니다
 $$('#wkScope button, #svScope button').forEach((b) => b.onclick = () => {
+  if (!discardWeekly()) return;
   state.scope = b.dataset.scope;
   pref.set('scope', state.scope);
   paintScope();
@@ -2132,12 +2134,18 @@ $('#addTeacherForm').addEventListener('submit', async (ev) => {
 /* '앱으로 보내기'를 눌러야 학생 · 보호자 앱에 도착하고 랭킹에 들어갑니다.   */
 /* 카드 · 계산은 shared/weekly.js — 학생 앱과 같은 코드라 화면이 똑같습니다. */
 /* ------------------------------------------------------------------ */
-const wkS = { ws: WK.weekStartOf(), list: [], wr: {} };
+const wkS = { ws: WK.weekStartOf(), list: [], wr: {}, published: {}, dirty: false };
+addEventListener('beforeunload', (e) => { if (wkS.dirty) { e.preventDefault(); e.returnValue = ''; } });
 
-$('#wkPrev').onclick = () => { wkS.ws = WK.addDays(wkS.ws, -7); loadWeeklyPage().catch(fail); };
-$('#wkNext').onclick = () => { wkS.ws = WK.addDays(wkS.ws, 7); loadWeeklyPage().catch(fail); };
+$('#wkPrev').onclick = () => { if (!discardWeekly()) return; wkS.ws = WK.addDays(wkS.ws, -7); loadWeeklyPage().catch(fail); };
+$('#wkNext').onclick = () => { if (!discardWeekly()) return; wkS.ws = WK.addDays(wkS.ws, 7); loadWeeklyPage().catch(fail); };
 
+function discardWeekly() {
+  if (wkS.dirty && !confirm('저장하지 않은 주간 리포트 입력을 버리고 이동할까요?')) return false;
+  wkS.dirty = false; return true;
+}
 async function loadWeeklyPage() {
+  if (!discardWeekly()) return;
   const ws = wkS.ws, thisWs = WK.weekStartOf();
   $('#wkTitle').textContent = ws === thisWs ? '이번 주 주간 리포트' : `${WK.weekLabel(ws)} 주간 리포트`;
   $('#wkRange').textContent = WK.weekRange(ws);
@@ -2147,26 +2155,30 @@ async function loadWeeklyPage() {
   const ids = studs.map((s) => s.id);
   if (!ids.length) { $('#wkCards').innerHTML = '<p class="empty">학생이 없습니다.</p>'; return; }
   const from = WK.parseDay(WK.addDays(ws, -7)).toISOString(), to = WK.parseDay(WK.addDays(ws, 7)).toISOString();
-  const [reps, sums, sched, wrs] = await Promise.all([
+  const [reps, sums, sched, wrs, drafts] = await Promise.all([
     sb.from('daily_reports').select('*').in('student_id', ids).gte('started_at', from).lt('started_at', to),
     sb.from('session_summaries').select('session_id, student_id, negative_count').in('student_id', ids).gte('started_at', from).lt('started_at', to),
     sb.from('student_schedule').select('*').in('student_id', ids),
     sb.from('weekly_reports').select('*').in('student_id', ids).lte('week_start', ws).order('week_start', { ascending: false }),
+    sb.from('weekly_report_drafts').select('*').in('student_id', ids).eq('week_start', ws),
   ]);
-  for (const r of [reps, sums, sched, wrs]) if (r.error) throw r.error;
+  for (const r of [reps, sums, sched, wrs, drafts]) if (r.error) throw r.error;
   const by = (rows, id) => (rows.data ?? []).filter((x) => x.student_id === id);
-  wkS.wr = {};
+  wkS.wr = {}; wkS.published = {};
   wkS.list = studs.map((st) => {
     const mine = by(wrs, st.id);
-    const wr = mine.find((w) => w.week_start === ws) ?? null;
-    wkS.wr[st.id] = wr;
+    const published = mine.find((w) => w.week_start === ws) ?? null;
+    const draft = (drafts.data ?? []).find((d) => d.student_id === st.id);
+    const wr = draft ? { ...draft.content, id: draft.id, sent_at: draft.sent_at, report_snapshot: null } : published;
+    wkS.published[st.id] = published; wkS.wr[st.id] = wr;
     const s = WK.assembleWeek({
       student: st, schedule: by(sched, st.id), reps: by(reps, st.id), sums: by(sums, st.id), wr,
       prevWr: mine.find((w) => w.week_start === WK.addDays(ws, -7)) ?? null,
       scores: mine.filter((w) => w.week_start < ws && w.sent_at && w.test_score != null).map((w) => w.test_score),
       ws, teacher: wr?.teacher_name || state.me.name,
     });
-    s.test.correct = wr?.test_correct ?? null;
+    const normalized = normalizeTest(s.test.total, s.test.correct, s.score);
+    s.test = { ...s.test, ...normalized }; s.score = normalized.score == null ? '' : String(normalized.score);
     s.learnTxt = s.learn.join(', ');
     s.nextTxt = s.nextL.join(', ');
     return s;
@@ -2177,10 +2189,10 @@ async function loadWeeklyPage() {
 const opts = (obj, cur) => Object.keys(obj).map((k) => `<option ${k === cur ? 'selected' : ''}>${esc(k)}</option>`).join('');
 function stuCard(s, i) {
   const w = WK.wkSum(s.jb), b = WK.bar3(s), u = WK.ups(s), has = s.score !== '';
-  const sent = wkS.wr[s.id]?.sent_at;
+  const sent = wkS.published[s.id]?.sent_at;
   const correctSel = `<select class="sel" data-i="${i}" data-f="correct" title="맞은 문항 수"><option value="">맞은 문항</option>${Array.from({ length: s.test.total + 1 }, (_, n) => `<option value="${n}" ${s.test.correct === n ? 'selected' : ''}>${n}개</option>`).join('')}</select>`;
   return `<div class="cs ${sent ? 'sent' : ''}">
-    <div class="cs-h"><div class="row" style="justify-content:space-between"><div><b>${esc(s.n)}</b> <span class="muted small">${esc(s.gr)} · STAGE ${s.st}</span></div>${sent ? `<span class="pill p-mint">앱으로 보냄 ${new Date(sent).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>` : wkS.wr[s.id]?.id && wkS.wr[s.id]?.updated_at > wkS.wr[s.id]?.created_at ? '<span class="pill p-gray">저장됨 · 안 보냄</span>' : ''}</div>
+    <div class="cs-h"><div class="row" style="justify-content:space-between"><div><b>${esc(s.n)}</b> <span class="muted small">${esc(s.gr)} · STAGE ${s.st}</span></div>${wkS.wr[s.id] && !wkS.wr[s.id].sent_at ? '<span class="pill p-sky">수정 초안 · 아직 안 보냄</span>' : ''}${sent ? `<span class="pill p-mint">앱으로 보냄 ${new Date(sent).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>` : wkS.wr[s.id]?.id && wkS.wr[s.id]?.updated_at > wkS.wr[s.id]?.created_at ? '<span class="pill p-gray">저장됨 · 안 보냄</span>' : ''}</div>
       <div class="auto">지옥방 <b>${w.came}/${s.jb.length}</b> · 순공 <b>${WK.hm(w.min) || '0분'}</b> · 문제 <b>${w.sol}</b>/${w.goal} · 정답률 <b>${w.acc}%</b> · 딴짓 <b>${w.warn}회</b></div></div>
     <div class="cs-bd ${b.all ? 'ok' : ''}">${b.all ? '🏅 주간 기준 4/4 통과 → 보내면 학생 앱에 다음 주 황금 오라' : `주간 기준 ${b.pass}/4 · 못 넘은 것: ${b.items.filter((x) => !x.ok).map((x) => x.t).join(', ')}`}</div>
     <div class="cs-up">${u.length ? `🎉 지난주보다 좋아진 점 (자동): ${u.slice(0, 4).map((x) => `${x.t} ${x.v}`).join(' · ')}` : s.prev ? '지난주보다 좋아진 점 없음 → 리포트 맨 위에 주간 기준 칸이 먼저 나와요' : '지난주 기록이 없어 비교하지 않아요'}</div>
@@ -2200,14 +2212,17 @@ function drawWeeklyCards() {
   $('#wkSubmit').textContent = `제출하고 ${wkS.list.length}명 주간 리포트 만들기`;
   const redraw = () => { const y = window.scrollY; drawWeeklyCards(); window.scrollTo(0, y); };
   $$('.sc', box).forEach((inp) => inp.onchange = () => {
+    wkS.dirty = true;
     const s = wkS.list[inp.dataset.i], v = inp.value.replace(/\D/g, '');
-    if (inp.dataset.f === 'total') { s.test.total = Math.max(1, Math.min(100, +v || 20)); if (s.test.correct != null) s.score = String(Math.round(s.test.correct / s.test.total * 100)); }
-    else { s.score = v === '' ? '' : String(Math.min(100, +v)); s.test.correct = v === '' ? null : Math.round(+s.score * s.test.total / 100); s.test.score = s.score === '' ? null : +s.score; }
+    const normalized = inp.dataset.f === 'total' ? normalizeTest(v, s.test.correct, s.score) : normalizeTest(s.test.total, null, v);
+    s.test = { ...s.test, ...normalized }; s.score = normalized.score == null ? '' : String(normalized.score);
+    if (inp.dataset.f === 'score' && v !== '' && +v !== normalized.score) toast(`균등 배점에 맞춰 ${normalized.correct}/${normalized.total}문항 · ${normalized.score}점으로 맞췄습니다`);
     if (s.score === '' || s.score == null) s.test.score = null;
     s.ev.under = WK.autoEval(s.jb, s.score === '' ? null : +s.score).under;
     redraw();
   });
   $$('select.sel', box).forEach((e) => e.onchange = () => {
+    wkS.dirty = true;
     const s = wkS.list[e.dataset.i];
     if (e.dataset.f === 'correct') {
       s.test.correct = e.value === '' ? null : +e.value;
@@ -2218,14 +2233,17 @@ function drawWeeklyCards() {
     } else s[e.dataset.f] = e.value;
   });
   $$('input.tx', box).forEach((e) => e.oninput = () => {
+    wkS.dirty = true;
     const s = wkS.list[e.dataset.i];
     if (e.dataset.f === 'range') s.test.range = e.value; else s[e.dataset.f] = e.value;
   });
   $$('.seg3 button', box).forEach((b) => b.onclick = () => {
+    wkS.dirty = true;
     wkS.list[b.dataset.i].ev[b.dataset.e] = +b.dataset.v;
     b.parentNode.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
   });
   $$('.stg button', box).forEach((b) => b.onclick = () => {
+    wkS.dirty = true;
     wkS.list[b.dataset.i].next = +b.dataset.n;
     b.parentNode.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
   });
@@ -2245,7 +2263,7 @@ $('#wkPaste').onclick = () => {
     const lines = $('#wkPasteTx').value.split(/\r?\n/).map((l) => l.split('\t').map((x) => x.trim()));
     const named = lines.some((c) => c.length > 1 && /[가-힣]/.test(c[0]));
     let n = 0;
-    const put = (s, v) => { v = String(v ?? '').replace(/\D/g, ''); s.score = v === '' ? '' : String(Math.min(100, +v)); s.test.score = s.score === '' ? null : +s.score; s.test.correct = s.score === '' ? null : Math.round(+s.score * s.test.total / 100); s.ev.under = WK.autoEval(s.jb, s.test.score).under; n++; };
+    const put = (s, v) => { wkS.dirty = true; v = String(v ?? '').replace(/\D/g, ''); const test = normalizeTest(s.test.total, null, v); s.test = { ...s.test, ...test }; s.score = test.score == null ? '' : String(test.score); s.ev.under = WK.autoEval(s.jb, test.score).under; n++; };
     if (named) for (const [nm, v] of lines) { const s = wkS.list.find((x) => x.n === nm); if (s) put(s, v); }
     else lines.forEach(([v], i) => { if (wkS.list[i]) put(wkS.list[i], v); });
     box.remove(); drawWeeklyCards();
@@ -2262,11 +2280,13 @@ $('#wkSubmit').onclick = async () => {
       test_total: s.test.total, test_correct: s.score === '' ? null : s.test.correct, test_score: s.score === '' ? null : +s.score,
       test_range: s.test.range || null, point_key: s.point, ev: s.ev, good_key: s.good, more_key: s.more,
       learn: s.learnTxt.split(',').map((x) => x.trim()).filter(Boolean), next_learn: s.nextTxt.split(',').map((x) => x.trim()).filter(Boolean),
-      next_stage: s.next, gold: WK.bar3(s).all, updated_at: new Date().toISOString(),
+      next_stage: s.next, gold: WK.bar3(s).all, report_snapshot: { ...s, learn: s.learnTxt.split(',').map(x => x.trim()).filter(Boolean), nextL: s.nextTxt.split(',').map(x => x.trim()).filter(Boolean) }, updated_at: new Date().toISOString(),
     }));
-    const { data, error } = await sb.from('weekly_reports').upsert(rows, { onConflict: 'student_id,week_start' }).select('*');
+    const drafts = rows.map((r) => ({ org_id: r.org_id, student_id: r.student_id, week_start: r.week_start, content: r, sent_at: null, updated_at: r.updated_at }));
+    const { data, error } = await sb.from('weekly_report_drafts').upsert(drafts, { onConflict: 'student_id,week_start' }).select('*');
     if (error) throw error;
-    for (const w of data ?? []) wkS.wr[w.student_id] = w;
+    for (const w of data ?? []) wkS.wr[w.student_id] = { ...w.content, id: w.id, sent_at: w.sent_at };
+    wkS.dirty = false;
     wkS.list.forEach((s) => { s.learn = rows.find((r) => r.student_id === s.id).learn; s.nextL = rows.find((r) => r.student_id === s.id).next_learn; s.gold = WK.bar3(s).all; });
     drawGallery();
   } catch (e) { fail(e); } finally { btn.disabled = false; }
@@ -2290,11 +2310,16 @@ async function sendWeekly() {
   if (!confirm(`${unsent.length}명에게 주간 리포트를 보낼까요?\n학생 · 보호자 앱에 도착하고, 형성평가 점수가 랭킹에 바로 들어갑니다.`)) return;
   const btn = $('#sendApp'); btn.disabled = true; btn.textContent = '보내는 중…';
   try {
+    const { error: publishError } = await sb.rpc('publish_weekly_drafts', { p_week: wkS.ws, p_students: unsent.map(s => s.id) });
+    if (publishError) throw publishError;
     const { data, error } = await sb.functions.invoke('notify', { body: { action: 'weekly_report', week_start: wkS.ws, student_ids: unsent.map((s) => s.id) } });
     if (error) throw error;
+    if (!data?.ok || data.count !== unsent.length) throw new Error('일부 리포트의 알림 발송을 확인하지 못했습니다. 다시 시도해 주세요');
+    const { error: markError } = await sb.from('weekly_report_drafts').update({ sent_at: new Date().toISOString() }).eq('week_start', wkS.ws).in('student_id', unsent.map(s => s.id));
+    if (markError) throw markError;
     toast(`${data.count}명에게 보냈습니다 · 형성평가 점수는 랭킹에 바로 반영됐어요`);
     await loadWeeklyPage(); drawGallery();
-  } catch (e) { fail(e); btn.disabled = false; }
+  } catch (e) { fail(e); btn.disabled = false; btn.textContent = '앱으로 보내기 다시 시도'; }
 }
 async function weeklyPng(s) {
   const host = document.createElement('div');
@@ -2413,3 +2438,9 @@ function go(to) {
   else                      { show(to); }
 }
 $$('[data-go]').forEach(b => b.onclick = () => go(b.dataset.go));
+
+document.querySelector('nav')?.addEventListener('click', (e) => {
+  if (!wkS.dirty || !e.target.closest('button')) return;
+  if (!confirm('저장하지 않은 주간 리포트 입력을 버리고 이동할까요?')) { e.preventDefault(); e.stopImmediatePropagation(); }
+  else wkS.dirty = false;
+}, true);
